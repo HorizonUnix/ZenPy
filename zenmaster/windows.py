@@ -268,9 +268,22 @@ def _mailbox_query(msg: int, rsp: int, args_base: int, op: int) -> tuple[int, li
 def _read_physical_memory(phys_addr: int, size: int) -> bytes | None:
     n   = (size + 7) // 8
     raw = _execute("ioctl_read_pm_table", [phys_addr, n], n)
-    if raw and any(raw):
-        return struct.pack(f"<{len(raw)}q", *raw)[:size]
+    if len(raw) == n:
+        return struct.pack(f"<{n}q", *raw)[:size]
     return None
+
+
+def _transfer_with_retry(msg: int, rsp: int, args_base: int, op: int,
+                         delays: tuple[float, ...] = (0.01, 0.1)) -> int:
+    with _lock:
+        status = _mailbox_send(msg, rsp, args_base, op, 0)
+    for delay in delays:
+        if status != SMU_REJECTED_PREREQ:
+            break
+        time.sleep(delay)
+        with _lock:
+            status = _mailbox_send(msg, rsp, args_base, op, 0)
+    return status
 
 
 def _send(table: dict, default: tuple, family: str, op: int, arg0: int) -> int:
@@ -317,17 +330,7 @@ def read_pm_table(family: str = "") -> bytes | None:
         return None
     phys_addr = (out[1] << 32) | out[0] if family in _TABLE_ADDR_64BIT else out[0]
 
-    with _lock:
-        status = _mailbox_send(msg, rsp, args_base, _TABLE_TRANSFER_OP[family], 0)
-    if status == SMU_REJECTED_PREREQ:
-        time.sleep(0.01)
-        with _lock:
-            status = _mailbox_send(msg, rsp, args_base, _TABLE_TRANSFER_OP[family], 0)
-        if status == SMU_REJECTED_PREREQ:
-            time.sleep(0.1)
-            with _lock:
-                status = _mailbox_send(msg, rsp, args_base, _TABLE_TRANSFER_OP[family], 0)
-
+    status = _transfer_with_retry(msg, rsp, args_base, _TABLE_TRANSFER_OP[family])
     if status != SMU_OK:
         return None
     return _read_physical_memory(phys_addr, size)

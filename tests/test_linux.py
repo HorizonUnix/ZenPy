@@ -1,6 +1,6 @@
 import struct
 from unittest.mock import patch
-import zenmaster.linux as linux
+from zenmaster import linux
 
 
 def _fake_pci(readback):
