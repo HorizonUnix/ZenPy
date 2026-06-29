@@ -186,8 +186,8 @@ if smu.pm_table_supported(info.family):
     ver  = smu.read_pm_table_version(info.family)
 
 # Send raw SMU commands directly
-smu.send_mp1(info.family, opcode=0x05, arg0=15000)
-smu.send_rsmu(info.family, opcode=0x53, arg0=90)
+smu.send_mp1(info.family, 0x05, 15000)
+smu.send_rsmu(info.family, 0x53, 90)
 ```
 
 **Look up supported args for a CPU:**
@@ -195,11 +195,13 @@ smu.send_rsmu(info.family, opcode=0x53, arg0=90)
 ```python
 from zenmaster import runner
 
-args = runner.get_supported_args("Raphael")
+args = runner.get_supported_args("Renoir")
+print(args)
 # ["stapm-limit", "fast-limit", "slow-limit", "tctl-temp", ...]
 
-opcodes = runner.lookup("Raphael", "stapm-limit")
-# [(True, 0x14), (False, 0x53)]  — (is_mp1, opcode)
+opcodes = runner.lookup("Renoir", "stapm-limit")
+print(opcodes)
+# [(True, 0x14), (False, 0x31)]  — (is_mp1, opcode)
 ```
 
 **Install with dev dependencies:**
