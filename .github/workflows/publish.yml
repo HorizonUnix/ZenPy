@@ -13,14 +13,12 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install
-
         run: pip install -e ".[dev]"
 
       - name: Test
-
         run: pytest
 
   publish:
@@ -35,10 +33,9 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Build
-
         run: |
           pip install build
           python -m build
