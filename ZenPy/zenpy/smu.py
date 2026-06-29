@@ -46,19 +46,19 @@ def send_rsmu(family: str, op: int, arg0: int = 0) -> int:
     return _backend().send_rsmu(family, op, arg0)
 
 
-def pm_table_supported() -> bool:
+def pm_table_supported(family: str = "") -> bool:
     b = _backend()
     fn = getattr(b, "pm_table_supported", None)
-    return fn() if fn else False
+    return fn(family) if fn else False
 
 
-def read_pm_table() -> bytes | None:
+def read_pm_table(family: str = "") -> bytes | None:
     b = _backend()
     fn = getattr(b, "read_pm_table", None)
-    return fn() if fn else None
+    return fn(family) if fn else None
 
 
-def read_pm_table_version() -> int:
+def read_pm_table_version(family: str = "") -> int:
     b = _backend()
     fn = getattr(b, "read_pm_table_version", None)
-    return fn() if fn else 0
+    return fn(family) if fn else 0

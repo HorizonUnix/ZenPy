@@ -21,6 +21,34 @@ _POLL_N      = 8192
 _lock        = threading.Lock()
 _handle      = None
 
+_PM_TABLE_FAMILIES = {
+    "Renoir", "Lucienne", "Cezanne", "Rembrandt",
+    "PhoenixPoint", "PhoenixPoint2", "HawkPoint", "HawkPoint2",
+    "SonomaValley", "StrixPoint", "KrackanPoint", "KrackanPoint2", "StrixHalo",
+}
+_TABLE_ADDR_64BIT = {
+    "Rembrandt", "PhoenixPoint", "PhoenixPoint2", "HawkPoint", "HawkPoint2",
+    "SonomaValley", "StrixPoint", "KrackanPoint", "KrackanPoint2", "StrixHalo",
+}
+_TABLE_VER_OP      = {f: 0x06 for f in _PM_TABLE_FAMILIES}
+_TABLE_ADDR_OP     = {f: 0x66 for f in _PM_TABLE_FAMILIES}
+_TABLE_TRANSFER_OP = {f: 0x65 for f in _PM_TABLE_FAMILIES}
+
+_TABLE_SIZES: dict[int, int] = {
+    0x001E0001: 0x568, 0x001E0002: 0x580, 0x001E0003: 0x578,
+    0x001E0004: 0x608, 0x001E0005: 0x608, 0x001E000A: 0x608, 0x001E0101: 0x608,
+    0x00370000: 0x794, 0x00370001: 0x884, 0x00370002: 0x88C,
+    0x00370003: 0x8AC, 0x00370004: 0x8AC, 0x00370005: 0x8C8,
+    0x003F0000: 0x7AC,
+    0x00400001: 0x910, 0x00400002: 0x928, 0x00400003: 0x94C,
+    0x00400004: 0x944, 0x00400005: 0x944,
+    0x00450004: 0xAA4, 0x00450005: 0xAB0,
+    0x004C0003: 0xB18, 0x004C0004: 0xB1C, 0x004C0005: 0xAF8,
+    0x004C0006: 0xAFC, 0x004C0007: 0xB00, 0x004C0008: 0xAF0, 0x004C0009: 0xB00,
+    0x005D0008: 0xD54, 0x005D0009: 0xD54, 0x005D000B: 0xD54,
+    0x0064020C: 0xE50,
+}
+
 _MP1: dict[str, tuple[int, int, int]] = {
     "SummitRidge":   (0x3B10528, 0x3B10564, 0x3B10598),
     "PinnacleRidge": (0x3B10528, 0x3B10564, 0x3B10598),
@@ -58,41 +86,94 @@ _RSMU: dict[str, tuple[int, int, int]] = {
 _RSMU_DEFAULT = (0x3B10A20, 0x3B10A80, 0x3B10A88)
 
 
+_PAWNIO_INSTALLER_URL = "https://github.com/namazso/PawnIO.Setup/releases/latest/download/PawnIO_setup.exe"
+
+
 def _assets_dir() -> str:
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+
+
+def _pawnio_installed() -> bool:
+    try:
+        import winreg
+        winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO",
+        )
+        return True
+    except OSError:
+        return False
+
+
+def _setup_k32():
+    import ctypes
+    import ctypes.wintypes
+    k32    = ctypes.windll.kernel32
+    HANDLE = ctypes.wintypes.HANDLE
+    DWORD  = ctypes.wintypes.DWORD
+    BOOL   = ctypes.wintypes.BOOL
+
+    k32.CreateFileW.restype  = HANDLE
+    k32.CreateFileW.argtypes = [
+        ctypes.c_wchar_p, DWORD, DWORD, ctypes.c_void_p, DWORD, DWORD, HANDLE,
+    ]
+    k32.DeviceIoControl.restype  = BOOL
+    k32.DeviceIoControl.argtypes = [
+        HANDLE, DWORD, ctypes.c_void_p, DWORD,
+        ctypes.c_void_p, DWORD, ctypes.POINTER(DWORD), ctypes.c_void_p,
+    ]
+    k32.CloseHandle.restype  = BOOL
+    k32.CloseHandle.argtypes = [HANDLE]
+    return k32
+
+
+def _open_device():
+    import ctypes
+    k32 = _setup_k32()
+    invalid = ctypes.wintypes.HANDLE(-1).value
+    for path in _DEVICE_PATHS:
+        h = k32.CreateFileW(path, 0xC0000000, 0x3, None, 3, 0, None)
+        if h is not None and h != 0 and h != invalid:
+            return k32, h
+    return k32, None
 
 
 def init() -> str:
     global _handle
     import ctypes
+    import ctypes.wintypes
 
     module_path = os.path.join(_assets_dir(), "AMD", "PawnIO", "RyzenSMU.bin")
     if not os.path.exists(module_path):
         raise RuntimeError(f"PawnIO module not found: {module_path}")
 
-    k32 = ctypes.windll.kernel32
-    k32.CreateFileW.restype = ctypes.c_void_p
-
-    handle = None
-    for path in _DEVICE_PATHS:
-        h = k32.CreateFileW(path, 0xC0000000, 0x3, None, 3, 0, None)
-        invalid = ctypes.c_void_p(-1).value
-        if h is not None and h != 0 and h != invalid:
-            handle = h
-            break
-
-    if handle is None:
+    if not _pawnio_installed():
         raise RuntimeError(
-            "PawnIO device not found. Install PawnIO: https://github.com/zorggn/PawnIO"
+            "PawnIO driver is not installed.\n"
+            f"Download and run the installer: {_PAWNIO_INSTALLER_URL}\n"
+            "After installation, reboot and run ZenPy again."
         )
 
-    data = open(module_path, "rb").read()
-    buf = (ctypes.c_uint8 * len(data))(*data)
-    ret = ctypes.c_uint32(0)
-    ok = k32.DeviceIoControl(handle, _IOCTL_LOAD, buf, len(data), None, 0, ctypes.byref(ret), None)
+    k32, handle = _open_device()
+    if handle is None:
+        raise RuntimeError(
+            "PawnIO device not found — driver may need a reboot to activate.\n"
+            f"If not installed: {_PAWNIO_INSTALLER_URL}"
+        )
+
+    data   = open(module_path, "rb").read()
+    in_buf = (ctypes.c_uint8 * len(data))(*data)
+    ret    = ctypes.wintypes.DWORD(0)
+    ok     = k32.DeviceIoControl(
+        handle, _IOCTL_LOAD,
+        in_buf, len(data),
+        None, 0,
+        ctypes.byref(ret), None,
+    )
     if not ok:
+        err = k32.GetLastError()
         k32.CloseHandle(handle)
-        raise RuntimeError(f"PawnIO LoadBinary failed (error {k32.GetLastError()})")
+        raise RuntimeError(f"PawnIO LoadBinary failed (error {err})")
 
     _handle = handle
     return "pawnio"
@@ -104,18 +185,21 @@ def active_backend() -> str | None:
 
 def _execute(fn_name: str, in_args: list[int], out_count: int) -> list[int]:
     import ctypes
+    import ctypes.wintypes
+    k32 = _setup_k32()
+
     name_buf = struct.pack("32s", fn_name.encode("ascii")[:31])
     args_buf = struct.pack(f"<{len(in_args)}q", *in_args) if in_args else b""
-    in_buf   = name_buf + args_buf
+    payload  = name_buf + args_buf
+    in_buf   = (ctypes.c_uint8 * len(payload))(*payload)
 
     out_buf = (ctypes.c_uint8 * (out_count * 8))() if out_count else None
     out_sz  = (out_count * 8) if out_count else 0
-    ret     = ctypes.c_uint32(0)
-    k32     = ctypes.windll.kernel32
+    ret     = ctypes.wintypes.DWORD(0)
 
     ok = k32.DeviceIoControl(
         _handle, _IOCTL_EXEC,
-        (ctypes.c_uint8 * len(in_buf))(*in_buf), len(in_buf),
+        in_buf, len(payload),
         out_buf, out_sz,
         ctypes.byref(ret), None,
     )
@@ -147,6 +231,26 @@ def _mailbox_send(msg: int, rsp: int, args_addr: int, op: int, arg0: int) -> int
     return SMU_FAILED
 
 
+def _mailbox_query(msg: int, rsp: int, args_base: int, op: int) -> tuple[int, list[int]]:
+    _smn_write(rsp, 0)
+    for i in range(_NARGS):
+        _smn_write(args_base + i * 4, 0)
+    _smn_write(msg, op)
+    for _ in range(_POLL_N):
+        r = _smn_read(rsp)
+        if r:
+            return r, [_smn_read(args_base + i * 4) for i in range(_NARGS)]
+    return SMU_FAILED, [0] * _NARGS
+
+
+def _read_physical_memory(phys_addr: int, size: int) -> bytes | None:
+    n = (size + 7) // 8
+    raw = _execute("ioctl_read_memory", [phys_addr, n], n)
+    if not raw:
+        return None
+    return struct.pack(f"<{len(raw)}q", *raw)[:size]
+
+
 def _send(table: dict, default: tuple, family: str, op: int, arg0: int) -> int:
     msg, rsp, args = table.get(family, default)
     with _lock:
@@ -161,5 +265,46 @@ def send_rsmu(family: str, op: int, arg0: int = 0) -> int:
     return _send(_RSMU, _RSMU_DEFAULT, family, op, arg0)
 
 
-def pm_table_supported() -> bool:
-    return False
+def pm_table_supported(family: str = "") -> bool:
+    return family in _PM_TABLE_FAMILIES
+
+
+def read_pm_table_version(family: str = "") -> int:
+    if not _handle or family not in _PM_TABLE_FAMILIES:
+        return 0
+    msg, rsp, args_base = _RSMU.get(family, _RSMU_DEFAULT)
+    with _lock:
+        status, out = _mailbox_query(msg, rsp, args_base, _TABLE_VER_OP[family])
+    return out[0] if status == SMU_OK else 0
+
+
+def read_pm_table(family: str = "") -> bytes | None:
+    import time
+    if not _handle or family not in _PM_TABLE_FAMILIES:
+        return None
+    msg, rsp, args_base = _RSMU.get(family, _RSMU_DEFAULT)
+
+    with _lock:
+        status, out = _mailbox_query(msg, rsp, args_base, _TABLE_VER_OP[family])
+    if status != SMU_OK:
+        return None
+    size = _TABLE_SIZES.get(out[0], 0x1000)
+
+    with _lock:
+        status, out = _mailbox_query(msg, rsp, args_base, _TABLE_ADDR_OP[family])
+    if status != SMU_OK:
+        return None
+    phys_addr = (out[1] << 32) | out[0] if family in _TABLE_ADDR_64BIT else out[0]
+
+    with _lock:
+        status = _mailbox_send(msg, rsp, args_base, _TABLE_TRANSFER_OP[family], 0)
+    if status == SMU_REJECTED_PREREQ:
+        time.sleep(0.01)
+        with _lock:
+            status = _mailbox_send(msg, rsp, args_base, _TABLE_TRANSFER_OP[family], 0)
+        if status == SMU_REJECTED_PREREQ:
+            time.sleep(0.1)
+            with _lock:
+                _mailbox_send(msg, rsp, args_base, _TABLE_TRANSFER_OP[family], 0)
+
+    return _read_physical_memory(phys_addr, size)

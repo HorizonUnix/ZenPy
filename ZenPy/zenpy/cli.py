@@ -164,7 +164,7 @@ def _show_help(info: CpuInfo) -> None:
     print("  --info           Show CPU and backend info (no root needed)")
     print("  --json           Machine-readable JSON output")
     print("  --reapply=N      Re-apply settings every N seconds (foreground)")
-    if smu.pm_table_supported():
+    if smu.pm_table_supported(info.family):
         print("  --table          Show labeled power metrics table (like ryzenadj --info)")
         print("  --dump-table     Dump raw PM table floats with hex offsets")
     print()
@@ -254,15 +254,15 @@ def _format_results(results: list[dict], info: CpuInfo, backend: str | None,
         return "\n".join(lines)
 
 
-def _require_pm_table(json_out: bool) -> bytes:
-    if not smu.pm_table_supported():
-        msg = "PM table not available (requires ryzen_smu kernel module)"
+def _require_pm_table(json_out: bool, family: str = "") -> bytes:
+    if not smu.pm_table_supported(family):
+        msg = "PM table not available on this platform/family"
         if json_out:
             print(json.dumps({"error": msg}))
         else:
             print(f"ZenPy: {msg}", file=sys.stderr)
         sys.exit(1)
-    data = smu.read_pm_table()
+    data = smu.read_pm_table(family)
     if not data:
         msg = "Failed to read PM table"
         if json_out:
@@ -273,9 +273,9 @@ def _require_pm_table(json_out: bool) -> bytes:
     return data
 
 
-def _show_table(json_out: bool) -> None:
-    data = _require_pm_table(json_out)
-    ver  = smu.read_pm_table_version()
+def _show_table(json_out: bool, family: str = "") -> None:
+    data = _require_pm_table(json_out, family)
+    ver  = smu.read_pm_table_version(family)
     rows = read_table(data, ver)
 
     if json_out:
@@ -294,8 +294,8 @@ def _show_table(json_out: bool) -> None:
         print(sep)
 
 
-def _dump_pm_table(json_out: bool) -> None:
-    data = _require_pm_table(json_out)
+def _dump_pm_table(json_out: bool, family: str = "") -> None:
+    data = _require_pm_table(json_out, family)
     count = len(data) // 4
     values = list(struct.unpack(f"<{count}f", data[:count * 4]))
 
@@ -343,12 +343,12 @@ def main() -> None:
             sys.exit(0)
 
     if flags.table:
-        _show_table(flags.json_out)
+        _show_table(flags.json_out, info.family)
         if not rest and not flags.dump_table:
             sys.exit(0)
 
     if flags.dump_table:
-        _dump_pm_table(flags.json_out)
+        _dump_pm_table(flags.json_out, info.family)
         if not rest:
             sys.exit(0)
 

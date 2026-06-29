@@ -88,7 +88,7 @@ def init() -> str:
         if not os.path.isdir(DRIVER_PATH):
             raise RuntimeError(
                 "Secure Boot is enabled but ryzen_smu is not loaded.\n"
-                "Install the ryzen_smu kernel module: https://github.com/leogx9r/ryzen_smu"
+                "Install and load the ryzen_smu kernel module before running ZenPy."
             )
         if not os.path.exists(SMN_PATH):
             raise RuntimeError(
@@ -200,11 +200,11 @@ def send_rsmu(family: str, op: int, arg0: int = 0) -> int:
     return _send(_RSMU, _RSMU_DEFAULT, family, op, arg0)
 
 
-def pm_table_supported() -> bool:
+def pm_table_supported(family: str = "") -> bool:
     return os.path.exists(DRIVER_PATH + "/pm_table")
 
 
-def read_pm_table_version() -> int:
+def read_pm_table_version(family: str = "") -> int:
     try:
         with open(DRIVER_PATH + "/pm_table_version", "rb") as f:
             raw = f.read(4)
@@ -213,7 +213,7 @@ def read_pm_table_version() -> int:
         return 0
 
 
-def read_pm_table() -> bytes | None:
+def read_pm_table(family: str = "") -> bytes | None:
     size_path = DRIVER_PATH + "/pm_table_size"
     table_path = DRIVER_PATH + "/pm_table"
     try:
