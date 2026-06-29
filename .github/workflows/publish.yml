@@ -16,11 +16,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        working-directory: ZenPy
+
         run: pip install -e ".[dev]"
 
       - name: Test
-        working-directory: ZenPy
+
         run: pytest
 
   publish:
@@ -38,7 +38,7 @@ jobs:
           python-version: "3.12"
 
       - name: Build
-        working-directory: ZenPy
+
         run: |
           pip install build
           python -m build
@@ -46,4 +46,4 @@ jobs:
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: ZenPy/dist/
+          packages-dir: dist/

@@ -21,9 +21,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install
-        working-directory: ZenPy
+
         run: pip install -e ".[dev]"
 
       - name: Test
-        working-directory: ZenPy
+
         run: pytest
