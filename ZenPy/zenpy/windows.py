@@ -162,11 +162,13 @@ def init() -> str:
         )
 
     data   = open(module_path, "rb").read()
-    in_buf = (ctypes.c_uint8 * len(data))(*data)
+    in_buf = ctypes.create_string_buffer(data)
     ret    = ctypes.wintypes.DWORD(0)
     ok     = k32.DeviceIoControl(
-        handle, _IOCTL_LOAD,
-        in_buf, len(data),
+        ctypes.wintypes.HANDLE(handle),
+        ctypes.wintypes.DWORD(_IOCTL_LOAD),
+        ctypes.cast(in_buf, ctypes.c_void_p),
+        ctypes.wintypes.DWORD(len(data)),
         None, 0,
         ctypes.byref(ret), None,
     )
@@ -191,22 +193,24 @@ def _execute(fn_name: str, in_args: list[int], out_count: int) -> list[int]:
     name_buf = struct.pack("32s", fn_name.encode("ascii")[:31])
     args_buf = struct.pack(f"<{len(in_args)}q", *in_args) if in_args else b""
     payload  = name_buf + args_buf
-    in_buf   = (ctypes.c_uint8 * len(payload))(*payload)
-
-    out_buf = (ctypes.c_uint8 * (out_count * 8))() if out_count else None
-    out_sz  = (out_count * 8) if out_count else 0
-    ret     = ctypes.wintypes.DWORD(0)
+    in_buf   = ctypes.create_string_buffer(payload)
+    out_buf  = ctypes.create_string_buffer(out_count * 8) if out_count else None
+    out_sz   = out_count * 8 if out_count else 0
+    ret      = ctypes.wintypes.DWORD(0)
 
     ok = k32.DeviceIoControl(
-        _handle, _IOCTL_EXEC,
-        in_buf, len(payload),
-        out_buf, out_sz,
+        ctypes.wintypes.HANDLE(_handle),
+        ctypes.wintypes.DWORD(_IOCTL_EXEC),
+        ctypes.cast(in_buf, ctypes.c_void_p),
+        ctypes.wintypes.DWORD(len(payload)),
+        ctypes.cast(out_buf, ctypes.c_void_p) if out_buf else None,
+        ctypes.wintypes.DWORD(out_sz),
         ctypes.byref(ret), None,
     )
     if not ok or ret.value == 0 or out_count == 0:
         return []
     count = min(ret.value // 8, out_count)
-    return list(struct.unpack(f"<{count}q", bytes(out_buf[: count * 8]))) + [0] * (out_count - count)
+    return list(struct.unpack(f"<{count}q", out_buf.raw[: count * 8])) + [0] * (out_count - count)
 
 
 def _smn_read(addr: int) -> int:
