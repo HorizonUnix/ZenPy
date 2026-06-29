@@ -262,6 +262,7 @@ _CMD_FF3: list[tuple[str, bool, int]] = [
     ("vrmmax-current",                     True,  0x1c),
     ("vrmsoc-current",                     True,  0x1b),
     ("vrmsocmax-current",                  True,  0x1d),
+    ("vrmcvip-current",                    True,  0x1d),
     ("vrmgfx-current",                     True,  0x1e),
     ("vrmgfxmax-current",                  True,  0x1f),
     ("prochot-deassertion-ramp",           True,  0x22),
@@ -420,6 +421,12 @@ _ALL_KNOWN_ARGS: frozenset[str] = frozenset(
     n for cmds in _SOCKET_COMMANDS.values() for n, _, _ in cmds
 )
 
+_FLAG_ARGS: frozenset[str] = frozenset({
+    "enable-oc", "disable-oc", "power-saving", "max-performance",
+    "disable-prochot", "setcpu-freqto-ramstate", "stopcpu-freqto-ramstate",
+    "set-fll-btc-enable",
+})
+
 _SOCKET_SHORT: dict[str, str] = {
     SOCKET_AM4_V1:      "AM4",
     SOCKET_FT5_FP5_AM4: "FP5",
@@ -464,3 +471,8 @@ def get_supported_args(family: str) -> list[str]:
 
 def all_known_args() -> frozenset[str]:
     return _ALL_KNOWN_ARGS
+
+
+def is_flag_arg(arg_name: str) -> bool:
+    norm = arg_name.lstrip("-").replace("_", "-").lower()
+    return norm in _FLAG_ARGS or norm.startswith("get-")

@@ -1,5 +1,5 @@
 from unittest.mock import patch, mock_open
-from zenmaster.hardware import detect, _parse_cpuinfo, _resolve_codename, _cpu_type, CpuInfo
+from zenmaster.hardware import detect, _parse_cpuinfo, _resolve_codename, _cpu_type
 
 CPUINFO_REMBRANDT = """processor\t: 0
 vendor_id\t: AuthenticAMD

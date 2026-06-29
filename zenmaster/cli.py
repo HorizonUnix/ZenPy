@@ -18,9 +18,9 @@ _CATEGORIES: dict[str, list[str]] = {
     "Thermal":         ["tctl-temp", "chtc-temp", "apu-skin-temp", "dgpu-skin-temp",
                         "skin-temp-limit"],
     "VRM & Currents":  ["vrm-current", "vrmmax-current", "vrmsoc-current",
-                        "vrmsocmax-current", "vrmgfx-current", "vrmgfxmax-current",
-                        "psi0-current", "psi0soc-current", "psi3cpu-current",
-                        "psi3gfx-current", "prochot-deassertion-ramp"],
+                        "vrmsocmax-current", "vrmcvip-current", "vrmgfx-current",
+                        "vrmgfxmax-current", "psi0-current", "psi0soc-current",
+                        "psi3cpu-current", "psi3gfx-current", "prochot-deassertion-ramp"],
     "Clocks":          ["max-cpuclk", "min-cpuclk", "max-gfxclk", "min-gfxclk",
                         "gfx-clk", "max-socclk-frequency", "min-socclk-frequency",
                         "max-fclk-frequency", "min-fclk-frequency",
@@ -52,7 +52,7 @@ _ARG_UNITS: dict[str, str] = {
     "tctl-temp": "°C",  "chtc-temp": "°C", "apu-skin-temp": "°C",
     "dgpu-skin-temp": "°C", "skin-temp-limit": "°C",
     "vrm-current": "mA", "vrmmax-current": "mA", "vrmsoc-current": "mA",
-    "vrmsocmax-current": "mA", "vrmgfx-current": "mA", "vrmgfxmax-current": "mA",
+    "vrmsocmax-current": "mA", "vrmcvip-current": "mA", "vrmgfx-current": "mA", "vrmgfxmax-current": "mA",
     "psi0-current": "mA", "psi0soc-current": "mA",
     "psi3cpu-current": "mA", "psi3gfx-current": "mA",
     "oc-clk": "MHz", "per-core-oc-clk": "MHz", "max-cpuclk": "MHz",
@@ -79,6 +79,7 @@ _ARG_DESCS: dict[str, str] = {
     "vrmmax-current":            "VRM Maximum Current Limit — EDC LIMIT VDD",
     "vrmsoc-current":            "VRM SoC Current Limit — TDC LIMIT SOC",
     "vrmsocmax-current":         "VRM SoC Maximum Current Limit — EDC LIMIT SOC",
+    "vrmcvip-current":           "VRM CVIP Current Limit — TDC LIMIT CVIP (VanGogh only)",
     "vrmgfx-current":            "VRM GFX Current Limit — TDC LIMIT GFX",
     "vrmgfxmax-current":         "VRM GFX Maximum Current Limit — EDC LIMIT GFX",
     "psi0-current":              "PSI0 VDD Current Limit",
@@ -160,10 +161,22 @@ def _is_root() -> bool:
     return os.geteuid() == 0
 
 
+def _arg_help_line(arg: str) -> str:
+    if runner.is_flag_arg(arg):
+        left = f"--{arg}"
+    else:
+        unit = _ARG_UNITS.get(arg, "")
+        unit_str = f"<{unit}>" if unit else "<value>"
+        left = f"--{arg}={unit_str}"
+    desc = _ARG_DESCS.get(arg, "Unknown command")
+    return f"    {left:<38} {desc}"
+
+
 def _show_help(info: CpuInfo) -> None:
-    supported = set(runner.get_supported_args(info.family))
+    supported_list = runner.get_supported_args(info.family)
+    supported = set(supported_list)
     socket = runner.get_socket(info.family) or "unknown"
-    print(f"ZenMaster — Ryzen Power Management Tool")
+    print("ZenMaster — Ryzen Power Management Tool")
     print()
     print("Usage: zenmaster [OPTIONS] [TUNING ARGS...]")
     print()
@@ -187,23 +200,17 @@ def _show_help(info: CpuInfo) -> None:
                 continue
             print(f"\n  {category}:")
             for arg in in_category:
-                unit = _ARG_UNITS.get(arg, "")
-                unit_str = f"<{unit}>" if unit else "<value>"
-                left = f"--{arg}={unit_str}"
-                desc = _ARG_DESCS.get(arg, "Unknown command")
-                print(f"    {left:<38} {desc}")
+                print(_arg_help_line(arg))
                 shown.add(arg)
 
-        uncategorised = [a for a in runner.get_supported_args(info.family) if a not in shown]
+        uncategorised = [a for a in supported_list if a not in shown]
         if uncategorised:
             print("\n  Other:")
             for arg in uncategorised:
-                left = f"--{arg}=<value>"
-                desc = _ARG_DESCS.get(arg, "Unknown command")
-                print(f"    {left:<38} {desc}")
+                print(_arg_help_line(arg))
 
     print()
-    print(f"WARNING: Use at your own risk!")
+    print("WARNING: Use at your own risk!")
     print(f"Version: {__version__}  |  By HorizonUnix  |  GPL-3.0")
 
 
@@ -241,10 +248,9 @@ def _format_results(results: list[dict], info: CpuInfo, backend: str | None,
                 {
                     "arg": r["arg"],
                     "value": r["value"],
-                    "mailbox": r.get("mailbox", ""),
-                    "opcode": f"0x{r['opcode']:02X}" if r.get("opcode") else "",
-                    "status": (smu.status_name(r["status"]) if r.get("status")
-                               else r.get("error", "unsupported")),
+                    "mailbox": r["mailbox"],
+                    "opcode": f"0x{r['opcode']:02X}" if r["opcode"] else "",
+                    "status": r["error"] if r["error"] else smu.status_name(r["status"]),
                 }
                 for r in results
             ],
@@ -254,7 +260,7 @@ def _format_results(results: list[dict], info: CpuInfo, backend: str | None,
     else:
         lines = []
         for r in results:
-            if "error" in r:
+            if r["error"]:
                 lines.append(f"{r['arg']} -> {r['error']}")
             else:
                 status_str = smu.status_name(r["status"])
@@ -341,14 +347,25 @@ def main() -> None:
         print(f"ZenMaster: unsupported CPU '{info.name}' (only AMD Ryzen supported)", file=sys.stderr)
         sys.exit(1)
 
+    if rest:
+        known = runner.all_known_args()
+        for token in rest:
+            name = token.lstrip("-").partition("=")[0].replace("_", "-").lower()
+            if not name:
+                continue
+            if name not in known or ("=" not in token and not runner.is_flag_arg(name)):
+                _show_help(info)
+                sys.exit(0)
+
     backend: str | None = None
 
     if flags.info:
-        try:
-            backend = smu.init()
-        except RuntimeError as e:
-            if not flags.json_out:
-                print(f"ZenMaster: backend unavailable: {e}", file=sys.stderr)
+        if _is_root():
+            try:
+                backend = smu.init()
+            except RuntimeError as e:
+                if not flags.json_out:
+                    print(f"ZenMaster: backend unavailable: {e}", file=sys.stderr)
         _show_info(info, backend, flags.json_out)
         if not rest and not flags.dump_table and not flags.table:
             sys.exit(0)
@@ -375,13 +392,6 @@ def main() -> None:
             sys.exit(0)
 
     if rest:
-        known = runner.all_known_args()
-        for token in rest:
-            name = token.lstrip("-").partition("=")[0].replace("_", "-").lower()
-            if name and name not in known:
-                _show_help(info)
-                sys.exit(0)
-
         args_str = " ".join(rest)
         try:
             while True:

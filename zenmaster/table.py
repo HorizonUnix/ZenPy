@@ -95,8 +95,7 @@ def read_table(data: bytes, ver: int) -> list[tuple[str, float, str]]:
     elif ver in _VRM_V3:
         vrm_cur, vrm_cur_val = 0x30, 0x34
         vrmsoc_cur, vrmsoc_cur_val = 0x38, 0x3C
-        vrmmax_cur, vrmmax_cur_val = 0x30, 0x34
-        vrmsocmax_cur, vrmsocmax_cur_val = 0x38, 0x3C
+        vrmmax_cur = vrmmax_cur_val = vrmsocmax_cur = vrmsocmax_cur_val = None
     else:
         vrm_cur = vrm_cur_val = vrmsoc_cur = vrmsoc_cur_val = None
         vrmmax_cur = vrmmax_cur_val = vrmsocmax_cur = vrmsocmax_cur_val = None

@@ -13,7 +13,62 @@ def test_apply_single_arg_ok():
 
 def test_apply_unsupported_arg():
     results, rejected = apply("--nonexistent-arg=1", "Rembrandt")
-    assert any(r["arg"] == "nonexistent-arg" and r["status"] == 0 for r in results)
+    assert any(r["arg"] == "nonexistent-arg" and r["error"] for r in results)
+
+
+def test_apply_result_always_has_error_key():
+    with patch("zenmaster.smu.send_mp1", return_value=SMU_OK), \
+         patch("zenmaster.smu.send_rsmu", return_value=SMU_OK):
+        results, _ = apply("--stapm-limit=15000", "Rembrandt")
+    assert all("error" in r for r in results)
+    assert all(r["error"] is None for r in results)
+
+
+def test_apply_flag_arg_no_value():
+    with patch("zenmaster.smu.send_mp1", return_value=SMU_OK), \
+         patch("zenmaster.smu.send_rsmu", return_value=SMU_OK):
+        results, rejected = apply("--enable-oc", "Rembrandt")
+    assert not rejected
+    assert any(r["arg"] == "enable-oc" for r in results)
+
+
+def test_apply_value_arg_without_value_is_error():
+    results, rejected = apply("--stapm-limit", "Rembrandt")
+    assert rejected
+    assert any(r["arg"] == "stapm-limit" and r["error"] for r in results)
+
+
+def test_apply_flag_arg_ignores_passed_value():
+    captured = []
+    def fake_mp1(family, op, arg0):
+        captured.append(arg0)
+        return SMU_OK
+    with patch("zenmaster.smu.send_mp1", side_effect=fake_mp1), \
+         patch("zenmaster.smu.send_rsmu", return_value=SMU_OK):
+        apply("--max-performance=5", "Rembrandt")
+    assert captured and all(v == 0 for v in captured)
+
+
+def test_apply_negative_value_wraps_to_uint32():
+    captured = []
+    def fake_mp1(family, op, arg0):
+        captured.append(arg0)
+        return SMU_OK
+    with patch("zenmaster.smu.send_mp1", side_effect=fake_mp1), \
+         patch("zenmaster.smu.send_rsmu", return_value=SMU_OK):
+        apply("--set-coall=-20", "Rembrandt")
+    assert captured and all(v == 0xFFFFFFEC for v in captured)
+
+
+def test_apply_hex_value():
+    captured = []
+    def fake_mp1(family, op, arg0):
+        captured.append(arg0)
+        return SMU_OK
+    with patch("zenmaster.smu.send_mp1", side_effect=fake_mp1), \
+         patch("zenmaster.smu.send_rsmu", return_value=SMU_OK):
+        apply("--stapm-limit=0x3a98", "Rembrandt")
+    assert 0x3a98 in captured
 
 
 def test_apply_unknown_family():
@@ -39,6 +94,17 @@ def test_apply_skin_temp_scale():
     assert any(v == 45 * 256 for v in captured)
 
 
+def test_apply_skin_temp_limit_not_scaled():
+    captured = []
+    def fake_send_mp1(family, op, arg0):
+        captured.append(arg0)
+        return SMU_OK
+    with patch("zenmaster.smu.send_mp1", side_effect=fake_send_mp1), \
+         patch("zenmaster.smu.send_rsmu", return_value=SMU_OK):
+        apply("--skin-temp-limit=15000", "Rembrandt")
+    assert captured and all(v == 15000 for v in captured)
+
+
 def test_apply_multiple_args():
     with patch("zenmaster.smu.send_mp1", return_value=SMU_OK), \
          patch("zenmaster.smu.send_rsmu", return_value=SMU_OK):
@@ -52,6 +118,19 @@ def test_apply_empty_string():
     results, rejected = apply("", "Rembrandt")
     assert results == []
     assert not rejected
+
+
+def test_apply_normalises_name_in_result():
+    with patch("zenmaster.smu.send_mp1", return_value=SMU_OK), \
+         patch("zenmaster.smu.send_rsmu", return_value=SMU_OK):
+        results, _ = apply("--STAPM_LIMIT=15000", "Rembrandt")
+    assert any(r["arg"] == "stapm-limit" for r in results)
+
+
+def test_apply_unclosed_quote_returns_error():
+    results, rejected = apply("--stapm-limit='15000", "Rembrandt")
+    assert rejected
+    assert results[0]["error"]
 
 
 def test_apply_strips_leading_dashes():

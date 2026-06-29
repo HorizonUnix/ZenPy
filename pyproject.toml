@@ -1,21 +1,22 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "zenmaster"
-version = "0.1.1"
+version = "0.2.0"
 requires-python = ">=3.10"
-description = "Pure-Python AMD Ryzen SMU power management for Linux and Windows"
+description = "Adjust power management settings for Ryzen CPUs on Linux and Windows"
 readme = "README.md"
-license = { text = "GPL-3.0-only" }
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "oxGorou", email = "lekhanhbinh2901@gmail.com" }]
 keywords = ["amd", "ryzen", "ryzenadj", "smu", "power-management", "tuning"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
@@ -27,6 +28,12 @@ classifiers = [
     "Topic :: System :: Hardware",
     "Topic :: Utilities",
 ]
+
+[project.urls]
+Homepage = "https://github.com/HorizonUnix/ZenMaster"
+Repository = "https://github.com/HorizonUnix/ZenMaster"
+"Bug Tracker" = "https://github.com/HorizonUnix/ZenMaster/issues"
+Changelog = "https://github.com/HorizonUnix/ZenMaster/blob/main/CHANGELOG.md"
 
 [project.scripts]
 zenmaster = "zenmaster.cli:main"

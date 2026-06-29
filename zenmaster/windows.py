@@ -141,6 +141,9 @@ def _open_device(k32):
 def init() -> str:
     global _handle, _k32
 
+    if _handle is not None:
+        return "pawnio"
+
     module_path = os.path.join(_assets_dir(), "AMD", "PawnIO", "RyzenSMU.bin")
     if not os.path.exists(module_path):
         raise RuntimeError(f"PawnIO module not found: {module_path}")
@@ -196,6 +199,8 @@ def active_backend() -> str | None:
 
 
 def _execute(fn_name: str, in_args: list[int], out_count: int) -> list[int]:
+    if _handle is None or _k32 is None:
+        raise RuntimeError("PawnIO not initialised — call smu.init() first")
     fn_bytes = fn_name.encode("ascii")[:31]
     name_buf = struct.pack("32s", fn_bytes)
     args_buf = struct.pack(f"<{len(in_args)}q", *in_args) if in_args else b""

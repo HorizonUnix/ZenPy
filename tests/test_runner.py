@@ -1,4 +1,4 @@
-from zenmaster.runner import lookup, get_supported_args, get_socket, get_socket_short, has_smu_support
+from zenmaster.runner import lookup, get_supported_args, get_socket, get_socket_short, has_smu_support, is_flag_arg
 
 
 def test_lookup_rembrandt_stapm():
@@ -61,3 +61,21 @@ def test_has_smu_support():
     assert has_smu_support("Rembrandt") is True
     assert has_smu_support("Raphael") is True
     assert has_smu_support("UnknownCPU") is False
+
+
+def test_is_flag_arg_ryzenadj_booleans():
+    assert is_flag_arg("enable-oc") is True
+    assert is_flag_arg("disable-oc") is True
+    assert is_flag_arg("power-saving") is True
+    assert is_flag_arg("max-performance") is True
+
+
+def test_is_flag_arg_get_queries():
+    assert is_flag_arg("get-pbo-scalar") is True
+    assert is_flag_arg("get-max-cpu-clk") is True
+
+
+def test_is_flag_arg_value_args():
+    assert is_flag_arg("stapm-limit") is False
+    assert is_flag_arg("tctl-temp") is False
+    assert is_flag_arg("vrm-current") is False

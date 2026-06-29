@@ -2,7 +2,7 @@ from __future__ import annotations
 import shlex
 from zenmaster import runner, smu
 
-_SKIN_ARGS = {"apu-skin-temp", "dgpu-skin-temp", "skin-temp-limit"}
+_SKIN_ARGS = {"apu-skin-temp", "dgpu-skin-temp"}
 
 
 def _skin_scale(arg_name: str, value: int) -> int:
@@ -10,7 +10,12 @@ def _skin_scale(arg_name: str, value: int) -> int:
 
 
 def apply(args_str: str, family: str) -> tuple[list[dict], bool]:
-    tokens = shlex.split(args_str) if args_str.strip() else []
+    try:
+        tokens = shlex.split(args_str) if args_str.strip() else []
+    except ValueError:
+        return [{"arg": "", "value": 0, "mailbox": "", "opcode": 0,
+                 "status": 0, "error": "invalid preset string (unclosed quote)"}], True
+
     results: list[dict] = []
     had_rejection = False
 
@@ -20,25 +25,34 @@ def apply(args_str: str, family: str) -> tuple[list[dict], bool]:
             continue
 
         if "=" in token:
-            name, _, val_str = token.partition("=")
+            raw_name, _, val_str = token.partition("=")
+            name = raw_name.replace("_", "-").lower()
             try:
                 value = int(val_str, 0)
             except ValueError:
-                results.append({"arg": name, "value": 0, "mailbox": "", "opcode": 0, "status": 0,
-                                 "error": f"invalid value '{val_str}'"})
+                results.append({"arg": name, "value": 0, "mailbox": "", "opcode": 0,
+                                 "status": 0, "error": f"invalid value '{val_str}'"})
                 continue
         else:
-            name, value = token, 0
+            name = token.replace("_", "-").lower()
+            if not runner.is_flag_arg(name):
+                results.append({"arg": name, "value": 0, "mailbox": "", "opcode": 0,
+                                 "status": 0, "error": f"--{name} requires a value"})
+                had_rejection = True
+                continue
+            value = 0
+
+        if runner.is_flag_arg(name):
+            value = 0
 
         matches = runner.lookup(family, name)
         if not matches:
-            results.append({"arg": name, "value": value, "mailbox": "", "opcode": 0, "status": 0,
-                             "error": f"not supported on {family}"})
+            results.append({"arg": name, "value": value, "mailbox": "", "opcode": 0,
+                             "status": 0, "error": f"not supported on {family}"})
             had_rejection = True
             continue
 
-        smu_val = _skin_scale(name, value)
-        smu_val = max(0, min(0xFFFFFFFF, smu_val))
+        smu_val = _skin_scale(name, value) & 0xFFFFFFFF
 
         any_ok = False
         for is_mp1, op in matches:
@@ -50,7 +64,8 @@ def apply(args_str: str, family: str) -> tuple[list[dict], bool]:
                 mailbox = "RSMU"
             if status == smu.SMU_OK:
                 any_ok = True
-            results.append({"arg": name, "value": value, "mailbox": mailbox, "opcode": op, "status": status})
+            results.append({"arg": name, "value": value, "mailbox": mailbox,
+                             "opcode": op, "status": status, "error": None})
 
         if not any_ok:
             had_rejection = True

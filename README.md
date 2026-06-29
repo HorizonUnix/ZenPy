@@ -1,47 +1,68 @@
 # ZenMaster
 
-[![PyPI](https://img.shields.io/pypi/v/zenmaster)](https://pypi.org/project/zenmaster/)
-[![Python](https://img.shields.io/pypi/pyversions/zenmaster)](https://pypi.org/project/zenmaster/)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey)](https://pypi.org/project/zenmaster/)
+[![PyPI](https://img.shields.io/pypi/v/zenmaster?style=flat-square&color=blue)](https://pypi.org/project/zenmaster/)
+[![Python](https://img.shields.io/pypi/pyversions/zenmaster?style=flat-square&color=yellow)](https://pypi.org/project/zenmaster/)
+[![License](https://img.shields.io/badge/License-GPLv3-blue?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey?style=flat-square)](https://pypi.org/project/zenmaster/)
 
-Pure-Python AMD Ryzen power management via SMU. Works on Linux and Windows. No compiler, no build chain, no dependencies.
+## Overview
+
+ZenMaster adjusts power management settings for AMD Ryzen CPUs and APUs on Linux and Windows. It uses the same CLI as [RyzenAdj](https://github.com/FlyGoat/RyzenAdj), so your existing commands and presets keep working, but you install it with `pip` and never need a compiler. Set power limits, temperature limits, VRM currents, clocks, voltages and Curve Optimiser offsets without touching the BIOS.
 
 ```bash
 pip install zenmaster
 ```
 
+Reasons to use it over RyzenAdj:
+
+- Installs with `pip` — no cmake, libpci, or building from source
+- Same `--name=value` syntax, so scripts and presets carry over unchanged
+- Uses [PawnIO](https://github.com/namazso/PawnIO) on Windows instead of WinRing0, which has known CVEs
+- `--help` lists only the arguments your CPU supports, not every possible option
+- `--table` shows a labeled sensor table; `--json` makes the output scriptable
+- `--reapply=N` keeps your settings applied so other software can't undo them
+- Works as a Python library — `import zenmaster` — on both Linux and Windows
+- No mandatory third-party dependencies on either platform
+
 ---
 
-## Features
+## Compatibility
 
-- Set and read power limits, thermal limits, clock ranges, voltages, and PBO/Curve Optimiser offsets
-- Live PM table — labeled power, thermal, and current sensor data
-- Dynamic `--help` that shows only what your CPU supports
-- JSON output for scripting and integration
-- `--reapply=N` to continuously re-apply a tuning preset
-- Embeddable Python library — use it as a backend in your own tuning tools
-- **No WinRing0** — Windows support uses [PawnIO](https://github.com/namazso/PawnIO), a modern signed driver
+| Platform | Status |
+|----------|--------|
+| Linux, Python 3.10+, root | Supported — `ryzen_smu` module or PCI direct access |
+| Windows, Python 3.10+, Administrator | Supported — PawnIO driver |
+| Intel | Not supported |
+
+> [!NOTE]
+> On Linux, PCI direct access works on most systems without any kernel module. **`ryzen_smu` is only required when Secure Boot is enabled**, because kernel lockdown blocks raw PCI access. Install [ryzen_smu](https://github.com/amkillam/ryzen_smu) ≥ 0.1.7 and enroll the signing key in that case.
+
+> [!WARNING]
+> This tool writes directly to the CPU's System Management Unit. Wrong values can cause instability, throttling, or a hard lock. Use at your own risk.
 
 ---
 
-## Why not RyzenAdj
+## How it compares to RyzenAdj
+
+ZenMaster keeps RyzenAdj's argument names and SMU opcode semantics, so it is a drop-in replacement for most use cases, while removing the build step and the WinRing0 driver.
 
 | | RyzenAdj | ZenMaster |
 |---|---|---|
-| Install | Build from source | `pip install zenmaster` |
-| Windows | WinRing0 ⚠️ | PawnIO ✅ |
-| `--help` | Static, shows all args | Dynamic — CPU-specific only |
+| Install | Build from source (cmake, pkg-config, libpci) | `pip install zenmaster` |
+| Language | C | Pure Python 3.10+ |
+| Windows driver | WinRing0 ⚠️ | PawnIO ✅ |
+| `--help` | Static — lists every argument | Dynamic — only your CPU's arguments |
 | Output | Plain text | Plain text or `--json` |
-| PM table | Raw floats | Labeled fields with units |
-| Embed / script | Shell out to binary | `import zenmaster` |
-| Build deps | cmake, make, libpci | None |
+| PM table | Raw float dump | Labeled fields with units (`--table`) |
+| Use as a library | Link the C `libryzenadj` / shell out | `import zenmaster` |
+| Build dependencies | cmake, make, libpci | None |
+| Focus | "Ryzen Mobile Processors" | Ryzen mobile **and** desktop |
 
 ### On WinRing0
 
-RyzenAdj's Windows backend uses WinRing0, a driver with well-documented security vulnerabilities ([CVE-2020-14979](https://nvd.nist.gov/vuln/detail/CVE-2020-14979), [CVE-2021-41285](https://nvd.nist.gov/vuln/detail/CVE-2021-41285)). It grants any unprivileged process full read/write access to physical memory, PCI config space, and I/O ports. Several AV vendors flag it as malicious outright.
+RyzenAdj's Windows backend uses WinRing0 (`OlsApi` / OpenLibSys), a driver with well-documented vulnerabilities ([CVE-2020-14979](https://nvd.nist.gov/vuln/detail/CVE-2020-14979), [CVE-2021-41285](https://nvd.nist.gov/vuln/detail/CVE-2021-41285)). It grants any unprivileged process full read/write access to physical memory, PCI config space, and I/O ports, and several AV vendors flag it outright.
 
-ZenMaster uses [PawnIO](https://github.com/namazso/PawnIO) instead — a purpose-built, Microsoft-signed kernel driver that exposes a controlled IOCTL interface. No raw memory access, no known CVEs.
+ZenMaster uses [PawnIO](https://github.com/namazso/PawnIO) instead — a purpose-built, Microsoft-signed kernel driver that exposes a narrow IOCTL interface. No raw physical-memory access, no known CVEs.
 
 ---
 
@@ -53,9 +74,9 @@ ZenMaster uses [PawnIO](https://github.com/namazso/PawnIO) instead — a purpose
 pip install zenmaster
 ```
 
-Requires root and either the `ryzen_smu` kernel module (recommended) or direct PCI access.
+Requires root, and either the `ryzen_smu` kernel module or PCI direct access (used automatically when available).
 
-**Install ryzen_smu module:**
+Install `ryzen_smu` (only needed when Secure Boot is on):
 
 ```bash
 git clone https://github.com/amkillam/ryzen_smu
@@ -63,13 +84,13 @@ cd ryzen_smu && make && sudo make install
 sudo modprobe ryzen_smu
 ```
 
-**Apply a tuning preset:**
+Apply a preset:
 
 ```bash
 sudo zenmaster --stapm-limit=15000 --fast-limit=20000 --tctl-temp=90
 ```
 
-**Re-apply every 30 seconds:**
+Re-apply every 30 seconds:
 
 ```bash
 sudo zenmaster --stapm-limit=15000 --reapply=30
@@ -78,7 +99,7 @@ sudo zenmaster --stapm-limit=15000 --reapply=30
 ### Windows
 
 1. Install [PawnIO](https://github.com/namazso/PawnIO.Setup/releases/latest/download/PawnIO_setup.exe) and reboot.
-2. Open an **Administrator** command prompt or terminal.
+2. Open an **Administrator** terminal.
 
 ```bat
 pip install zenmaster
@@ -95,14 +116,16 @@ zenmaster [OPTIONS] [TUNING ARGS...]
 
 | Option | Description |
 |---|---|
-| `--help` | Show supported tuning args for your CPU |
-| `--info` | Detected CPU name, family, socket, backend |
+| `--help` | Show the tuning arguments supported by your CPU |
+| `--info` | Detected CPU name, family, socket, and active backend |
 | `--table` | Live PM table with labeled values |
 | `--dump-table` | Raw PM table floats with hex offsets |
 | `--json` | Machine-readable JSON output |
 | `--reapply=N` | Re-apply settings every N seconds |
 
-**Example — check what your CPU supports:**
+Tuning arguments use the same `--name=value` form as RyzenAdj. Arguments that take no value (`--enable-oc`, `--power-saving`, `--get-*`, …) are passed as bare flags.
+
+**Check what your CPU supports:**
 
 ```
 $ zenmaster --help
@@ -117,15 +140,10 @@ Tuning arguments for AMD Ryzen 9 7950X (Raphael, AM5_V1):
     --stapm-limit=<mW>                 Sustained Power Limit — STAPM LIMIT
     --fast-limit=<mW>                  Actual Power Limit — PPT LIMIT FAST
     --slow-limit=<mW>                  Average Power Limit — PPT LIMIT SLOW
-    --stapm-time=<s>                   STAPM constant time
-    --slow-time=<s>                    Slow PPT constant time
-
-  Thermal:
-    --tctl-temp=<°C>                   Tctl Temperature Limit — THM LIMIT CORE
     ...
 ```
 
-**Example — live PM table (APU/mobile):**
+**Live PM table (APU / mobile):**
 
 ```
 $ sudo zenmaster --table
@@ -135,7 +153,6 @@ PM Table Version: 0x00450005
 | STAPM LIMIT             |    15.000 | stapm-limit            |
 | STAPM VALUE             |    12.441 |                        |
 | PPT LIMIT FAST          |    20.000 | fast-limit             |
-| PPT VALUE FAST          |    18.203 |                        |
 | THM LIMIT CORE          |    90.000 | tctl-temp              |
 | THM VALUE CORE          |    67.125 |                        |
 +-------------------------+-----------+------------------------+
@@ -145,64 +162,50 @@ PM Table Version: 0x00450005
 
 ## Library usage
 
-ZenMaster is designed to be embedded in tuning utilities, dashboards, and automation tools.
+ZenMaster is built to be embedded in tuning utilities, dashboards, and automation tools — including from non-Python apps via the `--json` CLI.
 
 ```python
-from zenmaster.hardware import detect
-from zenmaster import smu
-from zenmaster.apply import apply
+import zenmaster
+from zenmaster import detect, apply, smu
 
-# Detect CPU (no privileges needed)
+print(zenmaster.__version__)
+
 info = detect()
-print(info.name)    # "AMD Ryzen 9 7950X"
-print(info.family)  # "Raphael"
+print(info.name, info.family)
 
-# Initialise SMU backend — requires root/admin and a working driver.
-# Always raises RuntimeError with a clear message if something is missing.
-#
-# Linux failure cases:
-#   - ryzen_smu not loaded + Secure Boot on  → raises (lockdown blocks PCI too)
-#   - ryzen_smu not loaded + no PCI config   → raises
-#   - ryzen_smu loaded but /smn missing      → raises (module too old)
-#
-# Windows failure cases:
-#   - PawnIO not installed                   → raises with installer URL
-#   - PawnIO installed but not rebooted yet  → raises, says to reboot
-#   - Not running as Administrator           → raises
 try:
-    backend = smu.init()  # "ryzen_smu", "pci", or "pawnio"
+    backend = smu.init()
+    print(backend)
 except RuntimeError as e:
     print(f"SMU unavailable: {e}")
     raise SystemExit(1)
 
-# Apply tuning args — returns per-arg results + a rejection flag
 results, rejected = apply("--stapm-limit=15000 --tctl-temp=90", info.family)
 for r in results:
-    print(r["arg"], r["status"])  # 0x01 = SMU_OK
+    print(r["arg"], smu.status_name(r["status"]))
 
-# Read PM table (APU / mobile only)
+apply("--enable-oc", info.family)
+
 if smu.pm_table_supported(info.family):
     data = smu.read_pm_table(info.family)
     ver  = smu.read_pm_table_version(info.family)
 
-# Send raw SMU commands directly
 smu.send_mp1(info.family, 0x05, 15000)
-smu.send_rsmu(info.family, 0x53, 90)
+smu.send_rsmu(info.family, 0x31, 90)
 ```
 
-**Look up supported args for a CPU:**
+**Look up supported args for a CPU (no privileges needed):**
 
 ```python
 from zenmaster import runner
 
-args = runner.get_supported_args("Renoir")
-print(args)
-# ["stapm-limit", "fast-limit", "slow-limit", "tctl-temp", ...]
-
-opcodes = runner.lookup("Renoir", "stapm-limit")
-print(opcodes)
-# [(True, 0x14), (False, 0x31)]  — (is_mp1, opcode)
+print(runner.get_supported_args("Renoir"))
+print(runner.lookup("Renoir", "stapm-limit"))
+print(runner.is_flag_arg("enable-oc"))
+print(runner.is_flag_arg("stapm-limit"))
 ```
+
+A full runnable example lives in [`examples/demo.py`](examples/demo.py).
 
 **Install with dev dependencies:**
 
@@ -232,6 +235,12 @@ PM table support (`--table`): Renoir, Lucienne, Cezanne/Barcelo, Rembrandt, Phoe
 
 ---
 
-## License
+## Acknowledgments
 
-GPL-3.0. SMU opcode tables from [UXTU4Linux](https://github.com/JamesCJ60/Universal-x86-Tuning-Utility-Handheld) (GPL-3.0). PawnIO kernel interface from [namazso/PawnIO](https://github.com/namazso/PawnIO) (MIT).
+| Project | Contribution |
+|---------|-------------|
+| [RyzenAdj](https://github.com/FlyGoat/RyzenAdj) | Canonical argument names and SMU opcode semantics |
+| [UXTU4Linux](https://github.com/HorizonUnix/UXTU4Linux) | SMU opcode tables and Linux backend reference |
+| [Universal x86 Tuning Utility](https://github.com/JamesCJ60/Universal-x86-Tuning-Utility) | Windows PawnIO path and CPU detection approach |
+| [ryzen_smu](https://github.com/amkillam/ryzen_smu) | Linux kernel module for SMU access |
+| [PawnIO](https://github.com/namazso/PawnIO) | Modern signed Windows kernel driver |

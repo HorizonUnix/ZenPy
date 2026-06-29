@@ -82,8 +82,28 @@ def secure_boot_enabled() -> bool:
     return False
 
 
+def _pci_writable() -> bool:
+    if not os.path.exists(PCI_CONFIG):
+        return False
+    try:
+        fd = os.open(PCI_CONFIG, os.O_RDWR)
+        try:
+            os.lseek(fd, NB_ADDR, os.SEEK_SET)
+            os.write(fd, struct.pack("<I", 0x47))
+            os.lseek(fd, NB_ADDR, os.SEEK_SET)
+            data = os.read(fd, 4)
+            return len(data) >= 4 and struct.unpack("<I", data)[0] == 0x47
+        finally:
+            os.close(fd)
+    except OSError:
+        return False
+
+
 def init() -> str:
     global _backend
+
+    if _backend is not None:
+        return _backend
 
     if os.path.isdir(DRIVER_PATH):
         if not os.path.exists(SMN_PATH):
@@ -105,9 +125,17 @@ def init() -> str:
             "  2. Disable Secure Boot in UEFI firmware settings."
         )
 
-    if os.path.exists(PCI_CONFIG):
+    if _pci_writable():
         _backend = "pci"
         return _backend
+
+    if os.path.exists(PCI_CONFIG):
+        raise RuntimeError(
+            "PCI config space is present but not writable.\n"
+            "Run as root, and check that Secure Boot / kernel lockdown is off.\n"
+            "If Secure Boot must stay on, install and load ryzen_smu:\n"
+            "  https://github.com/amkillam/ryzen_smu"
+        )
 
     raise RuntimeError(
         "No SMU backend found.\n"
@@ -189,6 +217,8 @@ def _pci_send(fd: int, msg: int, rsp: int, args: int, op: int, arg0: int) -> int
 
 
 def _send(table: dict, default: tuple, family: str, op: int, arg0: int) -> int:
+    if _backend is None:
+        raise RuntimeError("SMU not initialised — call smu.init() first")
     msg, rsp, args = table.get(family, default)
     with _lock:
         if _backend == "ryzen_smu":
