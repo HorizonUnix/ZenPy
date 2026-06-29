@@ -23,6 +23,10 @@
 - Modernised packaging to PEP 639 SPDX license metadata
 
 ### Fixed
+- Windows PM table read now aborts if the final table-transfer retry is still
+  rejected, instead of reading stale/garbage physical memory
+- Windows SMU polling sleeps briefly after a fast initial spin, avoiding a busy
+  loop that pinned a core while waiting for the mailbox
 - `--skin-temp-limit` (a power limit in mW) is no longer multiplied by 256;
   only the temperature args `apu-skin-temp` and `dgpu-skin-temp` are scaled,
   matching RyzenAdj

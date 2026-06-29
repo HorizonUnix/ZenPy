@@ -1,10 +1,7 @@
 import sys
-import zenmaster
-from zenmaster.hardware import detect
-from zenmaster import smu, runner
-from zenmaster.apply import apply
+from zenmaster import __version__, detect, apply, smu, runner
 
-print(f"ZenMaster {zenmaster.__version__}")
+print(f"ZenMaster {__version__}")
 
 # CPU detection never needs root
 info = detect()

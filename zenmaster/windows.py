@@ -20,6 +20,8 @@ _IOCTL_LOAD  = 0xA1B22084
 _IOCTL_EXEC  = 0xA1B22104
 _NARGS       = 6
 _POLL_N      = 8192
+_FAST_POLL   = 64
+_POLL_SLEEP  = 0.0005
 _lock        = threading.Lock()
 _handle      = None
 _k32         = None
@@ -240,10 +242,12 @@ def _mailbox_send(msg: int, rsp: int, args_addr: int, op: int, arg0: int) -> int
     for i in range(1, _NARGS):
         _smn_write(args_addr + i * 4, 0)
     _smn_write(msg, op)
-    for _ in range(_POLL_N):
+    for i in range(_POLL_N):
         r = _smn_read(rsp)
         if r:
             return r
+        if i >= _FAST_POLL:
+            time.sleep(_POLL_SLEEP)
     return SMU_FAILED
 
 
@@ -252,10 +256,12 @@ def _mailbox_query(msg: int, rsp: int, args_base: int, op: int) -> tuple[int, li
     for i in range(_NARGS):
         _smn_write(args_base + i * 4, 0)
     _smn_write(msg, op)
-    for _ in range(_POLL_N):
+    for i in range(_POLL_N):
         r = _smn_read(rsp)
         if r:
             return r, [_smn_read(args_base + i * 4) for i in range(_NARGS)]
+        if i >= _FAST_POLL:
+            time.sleep(_POLL_SLEEP)
     return SMU_FAILED, [0] * _NARGS
 
 
@@ -320,6 +326,8 @@ def read_pm_table(family: str = "") -> bytes | None:
         if status == SMU_REJECTED_PREREQ:
             time.sleep(0.1)
             with _lock:
-                _mailbox_send(msg, rsp, args_base, _TABLE_TRANSFER_OP[family], 0)
+                status = _mailbox_send(msg, rsp, args_base, _TABLE_TRANSFER_OP[family], 0)
 
+    if status != SMU_OK:
+        return None
     return _read_physical_memory(phys_addr, size)
