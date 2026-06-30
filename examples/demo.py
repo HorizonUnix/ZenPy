@@ -35,6 +35,12 @@ for r in results:
 apply("--enable-oc", info.family)
 apply("--power-saving", info.family)
 
+# get-* commands read a value back from the SMU
+results, _ = apply("--get-pbo-scalar", info.family)
+for r in results:
+    if r["returned"] is not None:
+        print(r["arg"], "=", r["returned"])
+
 # PM table — APU/mobile only (Renoir, Cezanne, Phoenix, etc.)
 if smu.pm_table_supported(info.family):
     data = smu.read_pm_table(info.family)

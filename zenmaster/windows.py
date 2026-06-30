@@ -6,11 +6,10 @@ import struct
 import threading
 import time
 
-SMU_OK              = 0x01
-SMU_FAILED          = 0xFF
-SMU_UNKNOWN_CMD     = 0xFE
-SMU_REJECTED_PREREQ = 0xFD
-SMU_REJECTED_BUSY   = 0xFC
+from zenmaster.errors import BackendUnavailable, SMUNotInitialized
+from zenmaster.pmtable import PM_TABLE_CMDS, TABLE_SIZES, DEFAULT_TABLE_SIZE
+from zenmaster.mailbox import MP1, MP1_DEFAULT, RSMU, RSMU_DEFAULT, NARGS
+from zenmaster.smu import SMU_OK, SMU_FAILED, SMU_REJECTED_PREREQ
 
 _DEVICE_PATHS = [
     r"\\?\GLOBALROOT\Device\PawnIO",
@@ -18,77 +17,12 @@ _DEVICE_PATHS = [
 ]
 _IOCTL_LOAD  = 0xA1B22084
 _IOCTL_EXEC  = 0xA1B22104
-_NARGS       = 6
 _POLL_N      = 8192
 _FAST_POLL   = 64
 _POLL_SLEEP  = 0.0005
 _lock        = threading.Lock()
 _handle      = None
 _k32         = None
-
-_PM_TABLE_FAMILIES = {
-    "Renoir", "Lucienne", "Cezanne_Barcelo", "Rembrandt",
-    "PhoenixPoint", "PhoenixPoint2", "HawkPoint", "HawkPoint2",
-    "SonomaValley", "StrixPoint", "KrackanPoint", "KrackanPoint2", "StrixHalo",
-}
-_TABLE_ADDR_64BIT = {
-    "Rembrandt", "PhoenixPoint", "PhoenixPoint2", "HawkPoint", "HawkPoint2",
-    "SonomaValley", "StrixPoint", "KrackanPoint", "KrackanPoint2", "StrixHalo",
-}
-_TABLE_VER_OP      = {f: 0x06 for f in _PM_TABLE_FAMILIES}
-_TABLE_ADDR_OP     = {f: 0x66 for f in _PM_TABLE_FAMILIES}
-_TABLE_TRANSFER_OP = {f: 0x65 for f in _PM_TABLE_FAMILIES}
-
-_TABLE_SIZES: dict[int, int] = {
-    0x001E0001: 0x568, 0x001E0002: 0x580, 0x001E0003: 0x578,
-    0x001E0004: 0x608, 0x001E0005: 0x608, 0x001E000A: 0x608, 0x001E0101: 0x608,
-    0x00370000: 0x794, 0x00370001: 0x884, 0x00370002: 0x88C,
-    0x00370003: 0x8AC, 0x00370004: 0x8AC, 0x00370005: 0x8C8,
-    0x003F0000: 0x7AC,
-    0x00400001: 0x910, 0x00400002: 0x928, 0x00400003: 0x94C,
-    0x00400004: 0x944, 0x00400005: 0x944,
-    0x00450004: 0xAA4, 0x00450005: 0xAB0,
-    0x004C0003: 0xB18, 0x004C0004: 0xB1C, 0x004C0005: 0xAF8,
-    0x004C0006: 0xAFC, 0x004C0007: 0xB00, 0x004C0008: 0xAF0, 0x004C0009: 0xB00,
-    0x005D0008: 0xD54, 0x005D0009: 0xD54, 0x005D000B: 0xD54,
-    0x0064020C: 0xE50,
-}
-
-_MP1: dict[str, tuple[int, int, int]] = {
-    "SummitRidge":   (0x3B10528, 0x3B10564, 0x3B10598),
-    "PinnacleRidge": (0x3B10528, 0x3B10564, 0x3B10598),
-    "Matisse":       (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "Vermeer":       (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "VanGogh":       (0x3B10528, 0x3B10578, 0x3B10998),
-    "Mendocino":     (0x3B10528, 0x3B10578, 0x3B10998),
-    "Rembrandt":     (0x3B10528, 0x3B10578, 0x3B10998),
-    "PhoenixPoint":  (0x3B10528, 0x3B10578, 0x3B10998),
-    "PhoenixPoint2": (0x3B10528, 0x3B10578, 0x3B10998),
-    "HawkPoint":     (0x3B10528, 0x3B10578, 0x3B10998),
-    "HawkPoint2":    (0x3B10528, 0x3B10578, 0x3B10998),
-    "SonomaValley":  (0x3B10528, 0x3B10578, 0x3B10998),
-    "Raphael":       (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "DragonRange":   (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "GraniteRidge":  (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "FireRange":     (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "StrixPoint":    (0x3B10928, 0x3B10978, 0x3B10998),
-    "KrackanPoint":  (0x3B10928, 0x3B10978, 0x3B10998),
-    "KrackanPoint2": (0x3B10928, 0x3B10978, 0x3B10998),
-    "StrixHalo":     (0x3B10928, 0x3B10978, 0x3B10998),
-}
-_MP1_DEFAULT = (0x3B10528, 0x3B10564, 0x3B10998)
-
-_RSMU: dict[str, tuple[int, int, int]] = {
-    "SummitRidge":   (0x3B1051C, 0x3B10568, 0x3B10590),
-    "PinnacleRidge": (0x3B1051C, 0x3B10568, 0x3B10590),
-    "Matisse":       (0x3B10524, 0x3B10570, 0x3B10A40),
-    "Vermeer":       (0x3B10524, 0x3B10570, 0x3B10A40),
-    "Raphael":       (0x3B10524, 0x3B10570, 0x3B10A40),
-    "DragonRange":   (0x3B10524, 0x3B10570, 0x3B10A40),
-    "GraniteRidge":  (0x3B10524, 0x3B10570, 0x3B10A40),
-    "FireRange":     (0x3B10524, 0x3B10570, 0x3B10A40),
-}
-_RSMU_DEFAULT = (0x3B10A20, 0x3B10A80, 0x3B10A88)
 
 _PAWNIO_INSTALLER_URL = "https://github.com/namazso/PawnIO.Setup/releases/latest/download/PawnIO_setup.exe"
 
@@ -148,11 +82,11 @@ def init() -> str:
 
     module_path = os.path.join(_assets_dir(), "AMD", "PawnIO", "RyzenSMU.bin")
     if not os.path.exists(module_path):
-        raise RuntimeError(f"PawnIO module not found: {module_path}")
+        raise BackendUnavailable(f"PawnIO module not found: {module_path}")
 
     ver = _pawnio_info()
     if ver is None:
-        raise RuntimeError(
+        raise BackendUnavailable(
             "PawnIO driver is not installed.\n"
             f"Download and run the installer: {_PAWNIO_INSTALLER_URL}\n"
             "After installation, reboot and try again."
@@ -161,7 +95,7 @@ def init() -> str:
     k32    = _make_k32()
     handle = _open_device(k32)
     if handle is None:
-        raise RuntimeError(
+        raise BackendUnavailable(
             "PawnIO device not found — driver may need a reboot to activate.\n"
             f"If not installed: {_PAWNIO_INSTALLER_URL}"
         )
@@ -182,10 +116,10 @@ def init() -> str:
         if not ok:
             err = k32.GetLastError()
             ver_str = f" (PawnIO v{ver})" if ver else ""
-            raise RuntimeError(
+            raise BackendUnavailable(
                 f"PawnIO LoadBinary failed (error {err}){ver_str}\n"
-                "  Make sure you are running as Administrator and PawnIO is fully installed.\n"
-                f"  If error is 1 (INVALID_FUNCTION), try reinstalling PawnIO: {_PAWNIO_INSTALLER_URL}"
+                "Make sure you are running as Administrator and PawnIO is fully installed.\n"
+                f"If error is 1 (INVALID_FUNCTION), try reinstalling PawnIO: {_PAWNIO_INSTALLER_URL}"
             )
     except Exception:
         k32.CloseHandle(handle)
@@ -202,7 +136,7 @@ def active_backend() -> str | None:
 
 def _execute(fn_name: str, in_args: list[int], out_count: int) -> list[int]:
     if _handle is None or _k32 is None:
-        raise RuntimeError("PawnIO not initialised — call smu.init() first")
+        raise SMUNotInitialized("PawnIO not initialised — call smu.init() first")
     fn_bytes = fn_name.encode("ascii")[:31]
     name_buf = struct.pack("32s", fn_bytes)
     args_buf = struct.pack(f"<{len(in_args)}q", *in_args) if in_args else b""
@@ -239,7 +173,7 @@ def _smn_write(addr: int, value: int) -> None:
 def _mailbox_send(msg: int, rsp: int, args_addr: int, op: int, arg0: int) -> int:
     _smn_write(rsp, 0)
     _smn_write(args_addr, arg0)
-    for i in range(1, _NARGS):
+    for i in range(1, NARGS):
         _smn_write(args_addr + i * 4, 0)
     _smn_write(msg, op)
     for i in range(_POLL_N):
@@ -251,18 +185,20 @@ def _mailbox_send(msg: int, rsp: int, args_addr: int, op: int, arg0: int) -> int
     return SMU_FAILED
 
 
-def _mailbox_query(msg: int, rsp: int, args_base: int, op: int) -> tuple[int, list[int]]:
+def _mailbox_query(msg: int, rsp: int, args_base: int, op: int, arg0: int = 0) -> tuple[int, list[int]]:
     _smn_write(rsp, 0)
-    for i in range(_NARGS):
+    for i in range(NARGS):
         _smn_write(args_base + i * 4, 0)
+    if arg0:
+        _smn_write(args_base, arg0)
     _smn_write(msg, op)
     for i in range(_POLL_N):
         r = _smn_read(rsp)
         if r:
-            return r, [_smn_read(args_base + i * 4) for i in range(_NARGS)]
+            return r, [_smn_read(args_base + i * 4) for i in range(NARGS)]
         if i >= _FAST_POLL:
             time.sleep(_POLL_SLEEP)
-    return SMU_FAILED, [0] * _NARGS
+    return SMU_FAILED, [0] * NARGS
 
 
 def _read_physical_memory(phys_addr: int, size: int) -> bytes | None:
@@ -273,16 +209,16 @@ def _read_physical_memory(phys_addr: int, size: int) -> bytes | None:
     return None
 
 
-def _transfer_with_retry(msg: int, rsp: int, args_base: int, op: int,
+def _transfer_with_retry(msg: int, rsp: int, args_base: int, op: int, arg0: int = 0,
                          delays: tuple[float, ...] = (0.01, 0.1)) -> int:
     with _lock:
-        status = _mailbox_send(msg, rsp, args_base, op, 0)
+        status = _mailbox_send(msg, rsp, args_base, op, arg0)
     for delay in delays:
         if status != SMU_REJECTED_PREREQ:
             break
         time.sleep(delay)
         with _lock:
-            status = _mailbox_send(msg, rsp, args_base, op, 0)
+            status = _mailbox_send(msg, rsp, args_base, op, arg0)
     return status
 
 
@@ -292,45 +228,63 @@ def _send(table: dict, default: tuple, family: str, op: int, arg0: int) -> int:
         return _mailbox_send(msg, rsp, args, op, arg0)
 
 
+def _query(table: dict, default: tuple, family: str, op: int, arg0: int) -> tuple[int, list[int]]:
+    msg, rsp, args = table.get(family, default)
+    with _lock:
+        return _mailbox_query(msg, rsp, args, op, arg0)
+
+
 def send_mp1(family: str, op: int, arg0: int = 0) -> int:
-    return _send(_MP1, _MP1_DEFAULT, family, op, arg0)
+    return _send(MP1, MP1_DEFAULT, family, op, arg0)
 
 
 def send_rsmu(family: str, op: int, arg0: int = 0) -> int:
-    return _send(_RSMU, _RSMU_DEFAULT, family, op, arg0)
+    return _send(RSMU, RSMU_DEFAULT, family, op, arg0)
+
+
+def query_mp1(family: str, op: int, arg0: int = 0) -> tuple[int, list[int]]:
+    return _query(MP1, MP1_DEFAULT, family, op, arg0)
+
+
+def query_rsmu(family: str, op: int, arg0: int = 0) -> tuple[int, list[int]]:
+    return _query(RSMU, RSMU_DEFAULT, family, op, arg0)
 
 
 def pm_table_supported(family: str = "") -> bool:
-    return family in _PM_TABLE_FAMILIES
+    return family in PM_TABLE_CMDS
 
 
 def read_pm_table_version(family: str = "") -> int:
-    if not _handle or family not in _PM_TABLE_FAMILIES:
+    if not _handle or family not in PM_TABLE_CMDS:
         return 0
-    msg, rsp, args_base = _RSMU.get(family, _RSMU_DEFAULT)
+    ver_op = PM_TABLE_CMDS[family][0]
+    msg, rsp, args_base = RSMU.get(family, RSMU_DEFAULT)
     with _lock:
-        status, out = _mailbox_query(msg, rsp, args_base, _TABLE_VER_OP[family])
+        status, out = _mailbox_query(msg, rsp, args_base, ver_op)
     return out[0] if status == SMU_OK else 0
 
 
 def read_pm_table(family: str = "") -> bytes | None:
-    if not _handle or family not in _PM_TABLE_FAMILIES:
+    if not _handle or family not in PM_TABLE_CMDS:
         return None
-    msg, rsp, args_base = _RSMU.get(family, _RSMU_DEFAULT)
+    ver_op, addr_op, transfer_op, addr_64bit, extra = PM_TABLE_CMDS[family]
+    msg, rsp, args_base = RSMU.get(family, RSMU_DEFAULT)
 
     with _lock:
-        status, out = _mailbox_query(msg, rsp, args_base, _TABLE_VER_OP[family])
+        status, out = _mailbox_query(msg, rsp, args_base, ver_op)
     if status != SMU_OK:
         return None
-    size = _TABLE_SIZES.get(out[0], 0x1000)
+    size = TABLE_SIZES.get(out[0], DEFAULT_TABLE_SIZE)
 
     with _lock:
-        status, out = _mailbox_query(msg, rsp, args_base, _TABLE_ADDR_OP[family])
+        status, out = _mailbox_query(msg, rsp, args_base, addr_op, extra)
     if status != SMU_OK:
         return None
-    phys_addr = (out[1] << 32) | out[0] if family in _TABLE_ADDR_64BIT else out[0]
+    phys_addr = (out[1] << 32) | out[0] if addr_64bit else out[0]
+    if not phys_addr:
+        return None
 
-    status = _transfer_with_retry(msg, rsp, args_base, _TABLE_TRANSFER_OP[family])
+    status = _transfer_with_retry(msg, rsp, args_base, transfer_op, extra)
     if status != SMU_OK:
         return None
     return _read_physical_memory(phys_addr, size)

@@ -6,60 +6,22 @@ import subprocess
 import threading
 import time
 
+from zenmaster.errors import BackendUnavailable, SMUNotInitialized
+from zenmaster.pmtable import PM_TABLE_CMDS, TABLE_SIZES, DEFAULT_TABLE_SIZE
+from zenmaster.mailbox import MP1, MP1_DEFAULT, RSMU, RSMU_DEFAULT, NARGS
+from zenmaster.smu import SMU_OK, SMU_FAILED, SMU_REJECTED_PREREQ
+
 DRIVER_PATH = "/sys/kernel/ryzen_smu_drv"
 SMN_PATH    = DRIVER_PATH + "/smn"
 PCI_CONFIG  = "/sys/bus/pci/devices/0000:00:00.0/config"
 NB_ADDR     = 0xB8
 NB_DATA     = 0xBC
 
-SMU_OK              = 0x01
-SMU_FAILED          = 0xFF
-SMU_UNKNOWN_CMD     = 0xFE
-SMU_REJECTED_PREREQ = 0xFD
-SMU_REJECTED_BUSY   = 0xFC
-
-_NARGS    = 6
 _POLL_N   = 100
 _SLEEP_S  = 0.0001
 _DEADLINE = 1.0
 _lock     = threading.Lock()
 _backend: str | None = None
-
-_MP1: dict[str, tuple[int, int, int]] = {
-    "SummitRidge":   (0x3B10528, 0x3B10564, 0x3B10598),
-    "PinnacleRidge": (0x3B10528, 0x3B10564, 0x3B10598),
-    "Matisse":       (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "Vermeer":       (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "VanGogh":       (0x3B10528, 0x3B10578, 0x3B10998),
-    "Mendocino":     (0x3B10528, 0x3B10578, 0x3B10998),
-    "Rembrandt":     (0x3B10528, 0x3B10578, 0x3B10998),
-    "PhoenixPoint":  (0x3B10528, 0x3B10578, 0x3B10998),
-    "PhoenixPoint2": (0x3B10528, 0x3B10578, 0x3B10998),
-    "HawkPoint":     (0x3B10528, 0x3B10578, 0x3B10998),
-    "HawkPoint2":    (0x3B10528, 0x3B10578, 0x3B10998),
-    "SonomaValley":  (0x3B10528, 0x3B10578, 0x3B10998),
-    "Raphael":       (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "DragonRange":   (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "GraniteRidge":  (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "FireRange":     (0x3B10530, 0x3B1057C, 0x3B109C4),
-    "StrixPoint":    (0x3B10928, 0x3B10978, 0x3B10998),
-    "KrackanPoint":  (0x3B10928, 0x3B10978, 0x3B10998),
-    "KrackanPoint2": (0x3B10928, 0x3B10978, 0x3B10998),
-    "StrixHalo":     (0x3B10928, 0x3B10978, 0x3B10998),
-}
-_MP1_DEFAULT = (0x3B10528, 0x3B10564, 0x3B10998)
-
-_RSMU: dict[str, tuple[int, int, int]] = {
-    "SummitRidge":   (0x3B1051C, 0x3B10568, 0x3B10590),
-    "PinnacleRidge": (0x3B1051C, 0x3B10568, 0x3B10590),
-    "Matisse":       (0x3B10524, 0x3B10570, 0x3B10A40),
-    "Vermeer":       (0x3B10524, 0x3B10570, 0x3B10A40),
-    "Raphael":       (0x3B10524, 0x3B10570, 0x3B10A40),
-    "DragonRange":   (0x3B10524, 0x3B10570, 0x3B10A40),
-    "GraniteRidge":  (0x3B10524, 0x3B10570, 0x3B10A40),
-    "FireRange":     (0x3B10524, 0x3B10570, 0x3B10A40),
-}
-_RSMU_DEFAULT = (0x3B10A20, 0x3B10A80, 0x3B10A88)
 
 
 def secure_boot_enabled() -> bool:
@@ -107,7 +69,7 @@ def init() -> str:
 
     if os.path.isdir(DRIVER_PATH):
         if not os.path.exists(SMN_PATH):
-            raise RuntimeError(
+            raise BackendUnavailable(
                 "ryzen_smu is loaded but the /smn interface is missing — "
                 "upgrade to ryzen_smu >= 0.1.7."
             )
@@ -115,14 +77,14 @@ def init() -> str:
         return _backend
 
     if secure_boot_enabled():
-        raise RuntimeError(
+        raise BackendUnavailable(
             "Secure Boot is enabled and ryzen_smu is not loaded.\n"
             "Kernel lockdown mode also blocks PCI direct access, so there is no fallback.\n"
             "\n"
             "Options:\n"
-            "  1. Sign the ryzen_smu module with a MOK key and enroll it:\n"
-            "       https://github.com/amkillam/ryzen_smu\n"
-            "  2. Disable Secure Boot in UEFI firmware settings."
+            "1. Sign the ryzen_smu module with a MOK key and enroll it:\n"
+            "https://github.com/amkillam/ryzen_smu\n"
+            "2. Disable Secure Boot in UEFI firmware settings."
         )
 
     if _pci_writable():
@@ -130,19 +92,19 @@ def init() -> str:
         return _backend
 
     if os.path.exists(PCI_CONFIG):
-        raise RuntimeError(
+        raise BackendUnavailable(
             "PCI config space is present but not writable.\n"
             "Run as root, and check that Secure Boot / kernel lockdown is off.\n"
             "If Secure Boot must stay on, install and load ryzen_smu:\n"
-            "  https://github.com/amkillam/ryzen_smu"
+            "https://github.com/amkillam/ryzen_smu"
         )
 
-    raise RuntimeError(
+    raise BackendUnavailable(
         "No SMU backend found.\n"
-        f"  ryzen_smu module not loaded (expected: {DRIVER_PATH})\n"
-        f"  PCI config not accessible (expected: {PCI_CONFIG})\n"
+        f"ryzen_smu module not loaded (expected: {DRIVER_PATH})\n"
+        f"PCI config not accessible (expected: {PCI_CONFIG})\n"
         "Make sure you are running as root and the module is installed:\n"
-        "  https://github.com/amkillam/ryzen_smu"
+        "https://github.com/amkillam/ryzen_smu"
     )
 
 
@@ -163,25 +125,6 @@ def _smn_write(fd: int, addr: int, value: int) -> None:
     os.write(fd, struct.pack("<II", addr, value))
 
 
-def _smn_send(fd: int, msg: int, rsp: int, args: int, op: int, arg0: int) -> int:
-    _smn_write(fd, rsp, 0)
-    _smn_write(fd, args, arg0)
-    for i in range(1, _NARGS):
-        _smn_write(fd, args + i * 4, 0)
-    _smn_write(fd, msg, op)
-    for _ in range(_POLL_N):
-        r = _smn_read(fd, rsp)
-        if r:
-            return r
-    deadline = time.monotonic() + _DEADLINE
-    while time.monotonic() < deadline:
-        time.sleep(_SLEEP_S)
-        r = _smn_read(fd, rsp)
-        if r:
-            return r
-    return SMU_FAILED
-
-
 def _pci_read(fd: int, addr: int) -> int:
     os.lseek(fd, NB_ADDR, os.SEEK_SET)
     os.write(fd, struct.pack("<I", addr & ~3))
@@ -197,57 +140,134 @@ def _pci_write(fd: int, addr: int, value: int) -> None:
     os.write(fd, struct.pack("<I", value))
 
 
-def _pci_send(fd: int, msg: int, rsp: int, args: int, op: int, arg0: int) -> int:
-    _pci_write(fd, rsp, 0)
-    _pci_write(fd, args, arg0)
-    for i in range(1, _NARGS):
-        _pci_write(fd, args + i * 4, 0)
-    _pci_write(fd, msg, op)
+def _send_seq(write, read, fd: int, msg: int, rsp: int, args: int, op: int, arg0: int) -> int:
+    write(fd, rsp, 0)
+    write(fd, args, arg0)
+    for i in range(1, NARGS):
+        write(fd, args + i * 4, 0)
+    write(fd, msg, op)
     for _ in range(_POLL_N):
-        r = _pci_read(fd, rsp)
+        r = read(fd, rsp)
         if r:
             return r
     deadline = time.monotonic() + _DEADLINE
     while time.monotonic() < deadline:
         time.sleep(_SLEEP_S)
-        r = _pci_read(fd, rsp)
+        r = read(fd, rsp)
         if r:
             return r
     return SMU_FAILED
 
 
-def _send(table: dict, default: tuple, family: str, op: int, arg0: int) -> int:
+def _backend_io() -> tuple:
     if _backend is None:
-        raise RuntimeError("SMU not initialised — call smu.init() first")
+        raise SMUNotInitialized("SMU not initialised — call smu.init() first")
+    if _backend == "ryzen_smu":
+        return _smn_write, _smn_read, SMN_PATH
+    return _pci_write, _pci_read, PCI_CONFIG
+
+
+def _send(table: dict, default: tuple, family: str, op: int, arg0: int) -> int:
     msg, rsp, args = table.get(family, default)
+    write, read, path = _backend_io()
     with _lock:
-        if _backend == "ryzen_smu":
-            fd = os.open(SMN_PATH, os.O_RDWR)
-            try:
-                return _smn_send(fd, msg, rsp, args, op, arg0)
-            finally:
-                os.close(fd)
-        else:
-            fd = os.open(PCI_CONFIG, os.O_RDWR)
-            try:
-                return _pci_send(fd, msg, rsp, args, op, arg0)
-            finally:
-                os.close(fd)
+        fd = os.open(path, os.O_RDWR)
+        try:
+            return _send_seq(write, read, fd, msg, rsp, args, op, arg0)
+        finally:
+            os.close(fd)
+
+
+def _query(table: dict, default: tuple, family: str, op: int, arg0: int) -> tuple[int, list[int]]:
+    msg, rsp, args = table.get(family, default)
+    write, read, path = _backend_io()
+    with _lock:
+        fd = os.open(path, os.O_RDWR)
+        try:
+            status = _send_seq(write, read, fd, msg, rsp, args, op, arg0)
+            return status, [read(fd, args + i * 4) for i in range(NARGS)]
+        finally:
+            os.close(fd)
 
 
 def send_mp1(family: str, op: int, arg0: int = 0) -> int:
-    return _send(_MP1, _MP1_DEFAULT, family, op, arg0)
+    return _send(MP1, MP1_DEFAULT, family, op, arg0)
 
 
 def send_rsmu(family: str, op: int, arg0: int = 0) -> int:
-    return _send(_RSMU, _RSMU_DEFAULT, family, op, arg0)
+    return _send(RSMU, RSMU_DEFAULT, family, op, arg0)
+
+
+def query_mp1(family: str, op: int, arg0: int = 0) -> tuple[int, list[int]]:
+    return _query(MP1, MP1_DEFAULT, family, op, arg0)
+
+
+def query_rsmu(family: str, op: int, arg0: int = 0) -> tuple[int, list[int]]:
+    return _query(RSMU, RSMU_DEFAULT, family, op, arg0)
 
 
 def pm_table_supported(family: str = "") -> bool:
-    return os.path.exists(DRIVER_PATH + "/pm_table")
+    if os.path.exists(DRIVER_PATH + "/pm_table"):
+        return True
+    return family in PM_TABLE_CMDS
+
+
+def _read_devmem(phys: int, size: int) -> bytes | None:
+    import mmap
+    page = mmap.PAGESIZE
+    page_off = phys & ~(page - 1)
+    inner = phys - page_off
+    try:
+        fd = os.open("/dev/mem", os.O_RDONLY | os.O_SYNC)
+    except OSError:
+        return None
+    try:
+        mm = mmap.mmap(fd, inner + size, mmap.MAP_SHARED, mmap.PROT_READ, offset=page_off)
+        try:
+            mm.seek(inner)
+            return mm.read(size)
+        finally:
+            mm.close()
+    except (OSError, ValueError):
+        return None
+    finally:
+        os.close(fd)
+
+
+def _read_pm_table_pci(family: str) -> tuple[bytes, int] | None:
+    cmds = PM_TABLE_CMDS.get(family)
+    if cmds is None:
+        return None
+    ver_op, addr_op, transfer_op, addr_64bit, extra = cmds
+
+    status, out = query_rsmu(family, ver_op, 0)
+    if status != SMU_OK or not out[0]:
+        return None
+    ver = out[0]
+    size = TABLE_SIZES.get(ver, DEFAULT_TABLE_SIZE)
+
+    status, out = query_rsmu(family, addr_op, extra)
+    if status != SMU_OK:
+        return None
+    phys = (out[1] << 32) | out[0] if addr_64bit else out[0]
+    if not phys:
+        return None
+
+    status, _ = query_rsmu(family, transfer_op, extra)
+    if status == SMU_REJECTED_PREREQ:
+        time.sleep(0.01)
+        status, _ = query_rsmu(family, transfer_op, extra)
+    if status != SMU_OK:
+        return None
+
+    data = _read_devmem(phys, size)
+    return (data, ver) if data is not None else None
 
 
 def read_pm_table_version(family: str = "") -> int:
+    if _backend == "pci":
+        r = _read_pm_table_pci(family)
+        return r[1] if r else 0
     try:
         with open(DRIVER_PATH + "/pm_table_version", "rb") as f:
             raw = f.read(4)
@@ -257,6 +277,9 @@ def read_pm_table_version(family: str = "") -> int:
 
 
 def read_pm_table(family: str = "") -> bytes | None:
+    if _backend == "pci":
+        r = _read_pm_table_pci(family)
+        return r[0] if r else None
     size_path = DRIVER_PATH + "/pm_table_size"
     table_path = DRIVER_PATH + "/pm_table"
     try:

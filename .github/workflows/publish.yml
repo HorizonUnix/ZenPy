@@ -1,9 +1,6 @@
 name: Publish to PyPI
 
-on:
-  push:
-    tags:
-      - "v*"
+on: workflow_dispatch
 
 jobs:
   test:
@@ -36,6 +33,12 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Read version
+        id: ver
+        run: |
+          v=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
       - name: Build
         run: |
           pip install build
@@ -43,10 +46,12 @@ jobs:
 
       - name: Extract changelog
         id: changelog
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
           python3 - <<'EOF'
           import re, os
-          tag = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          tag = os.environ["VERSION"]
           text = open("CHANGELOG.md").read()
           m = re.search(
               r"## \[" + re.escape(tag) + r"\][^\n]*\n(.*?)(?=\n## \[|\Z)",
@@ -62,6 +67,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: v${{ steps.ver.outputs.version }}
           body: ${{ steps.changelog.outputs.notes }}
           files: dist/*
 

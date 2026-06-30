@@ -17,10 +17,11 @@ _CATEGORIES: dict[str, list[str]] = {
                         "apu-slow-limit", "stapm-time", "slow-time"],
     "Thermal":         ["tctl-temp", "chtc-temp", "apu-skin-temp", "dgpu-skin-temp",
                         "skin-temp-limit"],
-    "VRM & Currents":  ["vrm-current", "vrmmax-current", "vrmsoc-current",
-                        "vrmsocmax-current", "vrmcvip-current", "vrmgfx-current",
-                        "vrmgfxmax-current", "psi0-current", "psi0soc-current",
-                        "psi3cpu-current", "psi3gfx-current", "prochot-deassertion-ramp"],
+    "VRM & Currents":  ["tdc-limit", "edc-limit", "vrm-current", "vrmmax-current",
+                        "vrmsoc-current", "vrmsocmax-current", "vrmcvip-current",
+                        "vrmgfx-current", "vrmgfxmax-current", "psi0-current",
+                        "psi0soc-current", "psi3cpu-current", "psi3gfx-current",
+                        "prochot-deassertion-ramp"],
     "Clocks":          ["max-cpuclk", "min-cpuclk", "max-gfxclk", "min-gfxclk",
                         "gfx-clk", "max-socclk-frequency", "min-socclk-frequency",
                         "max-fclk-frequency", "min-fclk-frequency",
@@ -51,6 +52,7 @@ _ARG_UNITS: dict[str, str] = {
     "stapm-time": "s",  "slow-time": "s",
     "tctl-temp": "°C",  "chtc-temp": "°C", "apu-skin-temp": "°C",
     "dgpu-skin-temp": "°C", "skin-temp-limit": "°C",
+    "tdc-limit": "mA", "edc-limit": "mA",
     "vrm-current": "mA", "vrmmax-current": "mA", "vrmsoc-current": "mA",
     "vrmsocmax-current": "mA", "vrmcvip-current": "mA", "vrmgfx-current": "mA", "vrmgfxmax-current": "mA",
     "psi0-current": "mA", "psi0soc-current": "mA",
@@ -75,6 +77,8 @@ _ARG_DESCS: dict[str, str] = {
     "apu-skin-temp":             "APU Skin Temperature Limit — STT LIMIT APU",
     "dgpu-skin-temp":            "dGPU Skin Temperature Limit — STT LIMIT dGPU",
     "skin-temp-limit":           "Skin Temperature Power Limit",
+    "tdc-limit":                 "Thermal Design Current Limit — TDC LIMIT",
+    "edc-limit":                 "Electrical Design Current Limit — EDC LIMIT",
     "vrm-current":               "VRM Current Limit — TDC LIMIT VDD",
     "vrmmax-current":            "VRM Maximum Current Limit — EDC LIMIT VDD",
     "vrmsoc-current":            "VRM SoC Current Limit — TDC LIMIT SOC",
@@ -184,6 +188,7 @@ def _show_help(info: CpuInfo) -> None:
     print("  --info           Show CPU and backend info")
     print("  --json           Machine-readable JSON output")
     print("  --reapply=N      Re-apply settings every N seconds (foreground)")
+    print("  --version        Show version and check PyPI for a newer release")
     if smu.pm_table_supported(info.family):
         print("  --table          Show labeled power metrics table")
         print("  --dump-table     Dump raw PM table floats with hex offsets")
@@ -211,7 +216,28 @@ def _show_help(info: CpuInfo) -> None:
 
     print()
     print("WARNING: Use at your own risk!")
-    print(f"Version: {__version__}  |  By HorizonUnix  |  GPL-3.0")
+    print(f"Version: {__version__} by HorizonUnix under GPL-3.0 License")
+
+
+def _show_update(json_out: bool) -> None:
+    from zenmaster.update import latest_version, _ver_tuple
+    latest = latest_version()
+    newer = latest is not None and _ver_tuple(latest) > _ver_tuple(__version__)
+    if json_out:
+        print(json.dumps({
+            "installed": __version__,
+            "latest": latest,
+            "update_available": newer,
+        }, indent=2))
+        return
+    print(f"ZenMaster {__version__} (installed)")
+    if latest is None:
+        print("Could not reach PyPI to check for updates.")
+    elif newer:
+        print(f"A newer version is available: {latest}")
+        print("Update with:  pip install -U zenmaster")
+    else:
+        print("You are on the latest version.")
 
 
 def _show_info(info: CpuInfo, backend: str | None, json_out: bool) -> None:
@@ -251,6 +277,7 @@ def _format_results(results: list[dict], info: CpuInfo, backend: str | None,
                     "mailbox": r["mailbox"],
                     "opcode": f"0x{r['opcode']:02X}" if r["opcode"] else "",
                     "status": r["error"] if r["error"] else smu.status_name(r["status"]),
+                    "returned": r["returned"],
                 }
                 for r in results
             ],
@@ -262,6 +289,11 @@ def _format_results(results: list[dict], info: CpuInfo, backend: str | None,
         for r in results:
             if r["error"]:
                 lines.append(f"{r['arg']} -> {r['error']}")
+            elif r["returned"] is not None:
+                status_str = smu.status_name(r["status"])
+                lines.append(
+                    f"{r['arg']} [{r['mailbox']} 0x{r['opcode']:02X}] -> {status_str} = {r['returned']} (0x{r['returned']:08X})"
+                )
             else:
                 status_str = smu.status_name(r["status"])
                 lines.append(
@@ -316,7 +348,10 @@ def _dump_pm_table(json_out: bool, family: str = "") -> None:
     values = list(struct.unpack(f"<{count}f", data[:count * 4]))
 
     if json_out:
-        print(json.dumps({"pm_table": values}, indent=2))
+        print(json.dumps({
+            "pm_table": [{"offset": f"0x{i*4:04X}", "value": v}
+                         for i, v in enumerate(values)],
+        }, indent=2))
     else:
         for i, v in enumerate(values):
             print(f"| 0x{i*4:04X} | {v:9.3f} |")
@@ -334,12 +369,17 @@ def main() -> None:
         sys.exit(0)
 
     p = argparse.ArgumentParser(add_help=False)
-    p.add_argument("--info",       action="store_true")
-    p.add_argument("--json",       action="store_true", dest="json_out")
-    p.add_argument("--reapply",    type=int, default=0, metavar="SECONDS")
-    p.add_argument("--dump-table", action="store_true", dest="dump_table")
-    p.add_argument("--table",      action="store_true")
+    p.add_argument("--info",         action="store_true")
+    p.add_argument("--json",         action="store_true", dest="json_out")
+    p.add_argument("--reapply",      type=int, default=0, metavar="SECONDS")
+    p.add_argument("--dump-table",   action="store_true", dest="dump_table")
+    p.add_argument("--table",        action="store_true")
+    p.add_argument("--version",      action="store_true")
     flags, rest = p.parse_known_args(argv)
+
+    if flags.version:
+        _show_update(flags.json_out)
+        sys.exit(0)
 
     info = detect()
 
@@ -373,7 +413,7 @@ def main() -> None:
     if (flags.table or flags.dump_table or rest) and backend is None:
         if not _is_root():
             print("ZenMaster: root/admin privileges required.", file=sys.stderr)
-            print("       Run with sudo (Linux) or as Administrator (Windows).", file=sys.stderr)
+            print("Run with sudo (Linux) or as Administrator (Windows).", file=sys.stderr)
             sys.exit(1)
         try:
             backend = smu.init()

@@ -1,4 +1,4 @@
-from zenmaster.runner import lookup, get_supported_args, get_socket, get_socket_short, has_smu_support, is_flag_arg
+from zenmaster.runner import lookup, get_supported_args, get_socket, is_flag_arg
 
 
 def test_lookup_rembrandt_stapm():
@@ -51,16 +51,6 @@ def test_get_socket_raphael():
 
 def test_get_socket_unknown():
     assert get_socket("UnknownCPU") is None
-
-
-def test_get_socket_short_rembrandt():
-    assert get_socket_short("Rembrandt") == "FP7"
-
-
-def test_has_smu_support():
-    assert has_smu_support("Rembrandt") is True
-    assert has_smu_support("Raphael") is True
-    assert has_smu_support("UnknownCPU") is False
 
 
 def test_is_flag_arg_ryzenadj_booleans():

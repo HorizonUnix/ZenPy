@@ -122,8 +122,14 @@ zenmaster [OPTIONS] [TUNING ARGS...]
 | `--dump-table` | Raw PM table floats with hex offsets |
 | `--json` | Machine-readable JSON output |
 | `--reapply=N` | Re-apply settings every N seconds |
+| `--version` | Show the installed version and check PyPI for a newer release |
 
-Tuning arguments use the same `--name=value` form as RyzenAdj. Arguments that take no value (`--enable-oc`, `--power-saving`, `--get-*`, …) are passed as bare flags.
+Tuning arguments use the same `--name=value` form as RyzenAdj. Arguments that take no value (`--enable-oc`, `--power-saving`, `--get-*`, …) are passed as bare flags. The `--get-*` query commands print the value the SMU returns:
+
+```
+$ sudo zenmaster --get-pbo-scalar
+get-pbo-scalar [RSMU 0x6D] -> OK = 42 (0x0000002A)
+```
 
 **Check what your CPU supports:**
 
@@ -207,6 +213,22 @@ print(runner.is_flag_arg("stapm-limit"))
 
 A full runnable example lives in [`examples/demo.py`](examples/demo.py).
 
+**For integrators:**
+
+- The package ships type hints (`py.typed`) — your type checker sees the full API.
+- `smu.init()` raises `BackendUnavailable` on failure; SMU calls before init raise `SMUNotInitialized`. Both subclass `ZenMasterError`, which subclasses `RuntimeError`, so you can catch as narrowly or broadly as you like.
+- `apply()` returns `list[ApplyResult]` — each result is a dict with the stable keys `arg, value, mailbox, opcode, status, error, returned`. `error` is `None` on success; `returned` holds the value from a `get-*` query.
+- SMU status codes are `smu.SmuStatus` (an `IntEnum`); `smu.status_name(code)` gives a label.
+
+```python
+from zenmaster import smu, BackendUnavailable
+
+try:
+    smu.init()
+except BackendUnavailable as e:
+    ...  # no driver / not root / Secure Boot — message explains which
+```
+
 **Install with dev dependencies:**
 
 ```bash
@@ -216,11 +238,29 @@ pytest
 
 ---
 
+## Updating
+
+ZenMaster updates through pip:
+
+```bash
+pip install -U zenmaster
+```
+
+To check whether a newer release is on PyPI without updating:
+
+```bash
+zenmaster --version
+```
+
+From code, `zenmaster.check_update()` returns the newer version string, or `None` if you are current.
+
+---
+
 ## Supported CPUs
 
 Covers first-gen Ryzen (Summit Ridge / Zen 1) through Ryzen 9000 and Strix Halo. Run `zenmaster --info` to confirm detection and socket mapping.
 
-PM table support (`--table`): Renoir, Lucienne, Cezanne/Barcelo, Rembrandt, Phoenix Point, Hawk Point, Strix Point, Krackan Point, Strix Halo.
+PM table support (`--table`): Raven Ridge, Picasso, Dali, Pollock, Renoir, Lucienne, Cezanne/Barcelo, Van Gogh (Steam Deck), Mendocino, Rembrandt, Phoenix Point, Hawk Point, Strix Point, Krackan Point, Strix Halo. On Linux it reads through the `ryzen_smu` module when loaded, otherwise over PCI direct (`/dev/mem`, subject to kernel `CONFIG_STRICT_DEVMEM`).
 
 ---
 

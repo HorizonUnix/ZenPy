@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0] - 2026-06-30
+
+### Added
+- `get-*` query commands now return the value the SMU reports, shown in the CLI and in `--json` as a `returned` field; `smu.query_mp1()` / `smu.query_rsmu()` expose the raw read-back for library users
+- `--version` flag, which prints the installed version and checks PyPI for a newer release; `zenmaster.check_update()` exposes the same check to library users
+- Exception hierarchy for library users: `ZenMasterError` (base) with `BackendUnavailable`, `SMUNotInitialized`, `UnsupportedCPU`, all still subclass `RuntimeError`, so existing `except RuntimeError` keeps working
+- `smu.SmuStatus` IntEnum for SMU status codes (`SMU_OK` etc. now alias it)
+- `ApplyResult` TypedDict documenting the `apply()` result contract
+- `py.typed` marker so downstream type-checkers use the bundled type hints
+- PM-table support for the Raven/Picasso-era APUs (RavenRidge, Picasso, Dali, Pollock), which use a distinct table opcode set
+- Linux can now read the PM table over PCI direct access (via `/dev/mem`) when `ryzen_smu` is not loaded
+
+### Changed
+- `tdc-limit` and `edc-limit` now have descriptions and appear under "VRM & Currents" in `--help` instead of "Unknown command"
+- Moved the MP1/RSMU mailbox tables, SMU status codes, and PM-table metadata into shared modules (`mailbox.py`, `pmtable.py`)
+- Unified the Linux register send/poll path into one routine shared by the `ryzen_smu` and PCI backends; simplified `apply()` token parsing
+- Removed unused `runner` helpers (`get_socket_short`, `has_smu_support`, `get_commands`)
+
+### Fixed
+- Windows `--table` / `--dump-table` now work on VanGogh (Steam Deck) and Mendocino, which were missing from the PM-table family list
+
 ## [0.2.0] - 2026-06-30
 
 ### Added

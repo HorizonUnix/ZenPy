@@ -1,20 +1,30 @@
 from __future__ import annotations
 import platform
+from enum import IntEnum
 
 _IS_WINDOWS = platform.system() == "Windows"
 
-SMU_OK              = 0x01
-SMU_FAILED          = 0xFF
-SMU_UNKNOWN_CMD     = 0xFE
-SMU_REJECTED_PREREQ = 0xFD
-SMU_REJECTED_BUSY   = 0xFC
+
+class SmuStatus(IntEnum):
+    OK              = 0x01
+    FAILED          = 0xFF
+    UNKNOWN_CMD     = 0xFE
+    REJECTED_PREREQ = 0xFD
+    REJECTED_BUSY   = 0xFC
+
+
+SMU_OK              = SmuStatus.OK
+SMU_FAILED          = SmuStatus.FAILED
+SMU_UNKNOWN_CMD     = SmuStatus.UNKNOWN_CMD
+SMU_REJECTED_PREREQ = SmuStatus.REJECTED_PREREQ
+SMU_REJECTED_BUSY   = SmuStatus.REJECTED_BUSY
 
 _STATUS_NAMES = {
-    SMU_OK:              "OK",
-    SMU_FAILED:          "Failed",
-    SMU_UNKNOWN_CMD:     "Unknown command",
-    SMU_REJECTED_PREREQ: "Rejected (prerequisite)",
-    SMU_REJECTED_BUSY:   "Rejected (busy)",
+    SmuStatus.OK:              "OK",
+    SmuStatus.FAILED:          "Failed",
+    SmuStatus.UNKNOWN_CMD:     "Unknown command",
+    SmuStatus.REJECTED_PREREQ: "Rejected (prerequisite)",
+    SmuStatus.REJECTED_BUSY:   "Rejected (busy)",
 }
 
 
@@ -46,6 +56,14 @@ def send_mp1(family: str, op: int, arg0: int = 0) -> int:
 
 def send_rsmu(family: str, op: int, arg0: int = 0) -> int:
     return _backend().send_rsmu(family, op, arg0)
+
+
+def query_mp1(family: str, op: int, arg0: int = 0) -> tuple[int, list[int]]:
+    return _backend().query_mp1(family, op, arg0)
+
+
+def query_rsmu(family: str, op: int, arg0: int = 0) -> tuple[int, list[int]]:
+    return _backend().query_rsmu(family, op, arg0)
 
 
 def pm_table_supported(family: str = "") -> bool:

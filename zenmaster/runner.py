@@ -427,33 +427,8 @@ _FLAG_ARGS: frozenset[str] = frozenset({
     "set-fll-btc-enable",
 })
 
-_SOCKET_SHORT: dict[str, str] = {
-    SOCKET_AM4_V1:      "AM4",
-    SOCKET_FT5_FP5_AM4: "FP5",
-    SOCKET_AM4_V2:      "AM4",
-    SOCKET_FP6_AM4:     "FP6",
-    SOCKET_FF3:         "FF3",
-    SOCKET_FT6_FP7_FP8: "FP7",
-    SOCKET_AM5_V1:      "AM5",
-}
-
-
 def get_socket(family: str) -> str | None:
     return _FAMILY_SOCKET.get(family)
-
-
-def get_socket_short(family: str) -> str:
-    return _SOCKET_SHORT.get(get_socket(family) or "", "")
-
-
-def has_smu_support(family: str) -> bool:
-    sock = _FAMILY_SOCKET.get(family)
-    return bool(sock and _LOOKUP.get(sock))
-
-
-def get_commands(family: str) -> list[tuple[str, bool, int]]:
-    socket = _FAMILY_SOCKET.get(family)
-    return _SOCKET_COMMANDS.get(socket, []) if socket else []
 
 
 def lookup(family: str, arg_name: str) -> list[tuple[bool, int]]:

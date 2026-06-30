@@ -60,6 +60,30 @@ def test_apply_negative_value_wraps_to_uint32():
     assert captured and all(v == 0xFFFFFFEC for v in captured)
 
 
+def test_apply_get_command_returns_value():
+    with patch("zenmaster.smu.query_mp1", return_value=(SMU_OK, [1234, 0, 0, 0, 0, 0])), \
+         patch("zenmaster.smu.query_rsmu", return_value=(SMU_OK, [1234, 0, 0, 0, 0, 0])):
+        results, rejected = apply("--get-pbo-scalar", "Raphael")
+    assert not rejected
+    assert any(r["arg"] == "get-pbo-scalar" and r["returned"] == 1234 for r in results)
+
+
+def test_apply_get_command_returned_none_on_reject():
+    from zenmaster.smu import SMU_FAILED
+    with patch("zenmaster.smu.query_mp1", return_value=(SMU_FAILED, [0] * 6)), \
+         patch("zenmaster.smu.query_rsmu", return_value=(SMU_FAILED, [0] * 6)):
+        results, rejected = apply("--get-pbo-scalar", "Raphael")
+    assert rejected
+    assert all(r["returned"] is None for r in results)
+
+
+def test_apply_set_command_returned_is_none():
+    with patch("zenmaster.smu.send_mp1", return_value=SMU_OK), \
+         patch("zenmaster.smu.send_rsmu", return_value=SMU_OK):
+        results, _ = apply("--stapm-limit=15000", "Rembrandt")
+    assert all(r["returned"] is None for r in results)
+
+
 def test_apply_hex_value():
     captured = []
     def fake_mp1(family, op, arg0):
