@@ -444,6 +444,10 @@ def get_supported_args(family: str) -> list[str]:
     return list(_LOOKUP.get(sock, {}).keys()) if sock else []
 
 
+def is_supported(family: str) -> bool:
+    return get_socket(family) is not None and bool(get_supported_args(family))
+
+
 def all_known_args() -> frozenset[str]:
     return _ALL_KNOWN_ARGS
 

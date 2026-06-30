@@ -1,5 +1,5 @@
 import struct
-from unittest.mock import patch
+from unittest.mock import patch, mock_open
 from zenmaster import linux
 
 
@@ -40,18 +40,20 @@ def test_pci_writable_false_when_missing():
         assert linux._pci_writable() is False
 
 
-def test_init_prefers_ryzen_smu():
+def test_init_secure_boot_on_uses_ryzen_smu():
     linux._backend = None
-    with patch("os.path.isdir", return_value=True), \
-         patch("os.path.exists", return_value=True):
+    with patch("zenmaster.linux.secure_boot_enabled", return_value=True), \
+         patch("os.path.isdir", return_value=True), \
+         patch("os.path.exists", return_value=True), \
+         patch("zenmaster.linux.module_version_ok", return_value=True):
         assert linux.init() == "ryzen_smu"
     linux._backend = None
 
 
 def test_init_secure_boot_no_module_raises():
     linux._backend = None
-    with patch("os.path.isdir", return_value=False), \
-         patch("zenmaster.linux.secure_boot_enabled", return_value=True):
+    with patch("zenmaster.linux.secure_boot_enabled", return_value=True), \
+         patch("os.path.isdir", return_value=False):
         try:
             linux.init()
             assert False, "expected RuntimeError"
@@ -60,19 +62,44 @@ def test_init_secure_boot_no_module_raises():
     linux._backend = None
 
 
-def test_init_uses_pci_when_writable():
+def test_init_secure_boot_old_module_raises():
     linux._backend = None
-    with patch("os.path.isdir", return_value=False), \
-         patch("zenmaster.linux.secure_boot_enabled", return_value=False), \
+    with patch("zenmaster.linux.secure_boot_enabled", return_value=True), \
+         patch("os.path.isdir", return_value=True), \
+         patch("os.path.exists", return_value=True), \
+         patch("zenmaster.linux.module_version", return_value="0.1.5"), \
+         patch("zenmaster.linux.module_version_ok", return_value=False):
+        try:
+            linux.init()
+            assert False, "expected RuntimeError"
+        except RuntimeError as e:
+            assert "0.1.5" in str(e) and "0.1.7" in str(e)
+    linux._backend = None
+
+
+def test_module_version_ok_reads_drv_version():
+    with patch("builtins.open", mock_open(read_data="0.1.7\n")):
+        assert linux.module_version() == "0.1.7"
+        assert linux.module_version_ok() is True
+    with patch("builtins.open", mock_open(read_data="0.1.5")):
+        assert linux.module_version_ok() is False
+    with patch("builtins.open", side_effect=OSError):
+        assert linux.module_version() == "unknown"
+        assert linux.module_version_ok() is False
+
+
+def test_init_sb_off_uses_pci_even_with_module_loaded():
+    linux._backend = None
+    with patch("zenmaster.linux.secure_boot_enabled", return_value=False), \
+         patch("os.path.isdir", return_value=True), \
          patch("zenmaster.linux._pci_writable", return_value=True):
         assert linux.init() == "pci"
     linux._backend = None
 
 
-def test_init_pci_present_not_writable_raises():
+def test_init_sb_off_pci_not_writable_raises():
     linux._backend = None
-    with patch("os.path.isdir", return_value=False), \
-         patch("zenmaster.linux.secure_boot_enabled", return_value=False), \
+    with patch("zenmaster.linux.secure_boot_enabled", return_value=False), \
          patch("zenmaster.linux._pci_writable", return_value=False), \
          patch("os.path.exists", return_value=True):
         try:

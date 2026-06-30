@@ -26,6 +26,23 @@ Reasons to use it over RyzenAdj:
 
 ---
 
+## Documentation
+
+Full documentation lives in the [**Wiki**](https://github.com/HorizonUnix/ZenMaster/wiki):
+
+| Page | What's in it |
+|---|---|
+| [Installation](https://github.com/HorizonUnix/ZenMaster/wiki/Installation) | Linux and Windows setup, `ryzen_smu` and PawnIO |
+| [CLI Usage](https://github.com/HorizonUnix/ZenMaster/wiki/CLI-Usage) | Every option, examples, JSON output |
+| [Tuning Arguments](https://github.com/HorizonUnix/ZenMaster/wiki/Tuning-Arguments) | Full argument reference with units |
+| [PM Table and Monitoring](https://github.com/HorizonUnix/ZenMaster/wiki/PM-Table-and-Monitoring) | `--table` / `--dump-table` |
+| [Library API](https://github.com/HorizonUnix/ZenMaster/wiki/Library-API) | Embedding ZenMaster in Python |
+| [Architecture](https://github.com/HorizonUnix/ZenMaster/wiki/Architecture) | Internals, SMU protocol, opcode tables |
+| [Troubleshooting](https://github.com/HorizonUnix/ZenMaster/wiki/Troubleshooting) | Fixes for the common problems |
+| [FAQ](https://github.com/HorizonUnix/ZenMaster/wiki/FAQ) | Short answers |
+
+---
+
 ## Compatibility
 
 | Platform | Status |
@@ -117,8 +134,9 @@ zenmaster [OPTIONS] [TUNING ARGS...]
 | Option | Description |
 |---|---|
 | `--help` | Show the tuning arguments supported by your CPU |
-| `--info` | Detected CPU name, family, socket, and active backend |
+| `--info` | Detected CPU name, family, socket, active backend, and driver status |
 | `--table` | Live PM table with labeled values |
+| `--sensors` | Key live sensors only — temp, load, power, clocks (compact; structured under `--json`) |
 | `--dump-table` | Raw PM table floats with hex offsets |
 | `--json` | Machine-readable JSON output |
 | `--reapply=N` | Re-apply settings every N seconds |
@@ -164,6 +182,17 @@ PM Table Version: 0x00450005
 +-------------------------+-----------+------------------------+
 ```
 
+**Compact live sensors** — `--sensors` (add `--json` for a structured object a monitoring script can read directly):
+
+```
+$ sudo zenmaster --sensors
+CPU Temp    :     64.0 °C
+CPU Load    :     38.5 %
+Socket Power:     41.2 W
+iGPU Clock  :   2400.0 MHz
+Mem Clock   :   2400.0 MHz
+```
+
 ---
 
 ## Library usage
@@ -200,6 +229,22 @@ smu.send_mp1(info.family, 0x05, 15000)
 smu.send_rsmu(info.family, 0x31, 90)
 ```
 
+**Backend readiness and live sensors (0.4.0):**
+
+```python
+from zenmaster import smu
+
+smu.ensure_backend()           # init(), but returns the backend str or None — never raises
+smu.unavailable_reason()       # None if usable, else a ready-to-show "why not" message
+smu.module_status()            # driver verdict: .ok / .version / .min_version / .reason
+
+s = smu.read_pm_sensors(info.family)   # read + decode the PM table → PmSensors | None
+if s:
+    print(s.tctl_temp, s.cclk_busy, s.socket_power, s.gfx_clk)
+```
+
+These work the same on Linux and Windows, and are re-exported at the top level (`from zenmaster import module_status, read_pm_sensors, ...`) so apps never import from `zenmaster.linux`.
+
 **Look up supported args for a CPU (no privileges needed):**
 
 ```python
@@ -211,7 +256,11 @@ print(runner.is_flag_arg("enable-oc"))
 print(runner.is_flag_arg("stapm-limit"))
 ```
 
-A full runnable example lives in [`examples/demo.py`](examples/demo.py).
+Runnable examples live in [`examples/`](examples/):
+
+- [`demo.py`](examples/demo.py) — a tour of detection, apply, queries, and raw SMU access.
+- [`monitor_pmtable.py`](examples/monitor_pmtable.py) — live PM-table dump (ported from RyzenAdj's `get_table_values`).
+- [`reapply_loop.py`](examples/reapply_loop.py) — hold a preset against drift via `read_pm_sensors` + `apply` (ported from RyzenAdj's `get_fast_limit` loop).
 
 **For integrators:**
 

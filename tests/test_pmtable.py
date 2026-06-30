@@ -1,6 +1,8 @@
+import struct
 from unittest.mock import patch
 import zenmaster.linux as linux
 from zenmaster.pmtable import PM_TABLE_CMDS, TABLE_SIZES
+from zenmaster.table import read_sensors
 from zenmaster.smu import SMU_OK, SMU_FAILED
 
 
@@ -57,3 +59,35 @@ def test_linux_pci_returns_none_on_reject():
             assert linux.read_pm_table("Renoir") is None
     finally:
         linux._backend = None
+
+
+def _table_with(values):
+    data = bytearray(b"\x00" * 0x800)
+    for off, v in values.items():
+        struct.pack_into("<f", data, off, v)
+    return bytes(data)
+
+
+def test_read_sensors_zen4_offsets():
+    data = _table_with({0x00: 65.0, 0x04: 30.0, 0x44: 70.0, 0x104: 5.0,
+                        0x98: 42.0, 0x648: 2400.0})
+    s = read_sensors(data, 0x00400004)
+    assert s.stapm_limit == 65.0
+    assert s.stapm_value == 30.0
+    assert s.tctl_temp == 70.0
+    assert s.cclk_busy == 5.0
+    assert s.socket_power == 42.0
+    assert s.gfx_clk == 2400.0
+
+
+def test_read_sensors_missing_field_is_none():
+    s = read_sensors(b"\x00" * 0x20, 0x00400004)
+    assert s.gfx_clk is None        # offset past the short buffer
+    assert s.stapm_limit == 0.0     # in range, decodes to 0.0
+
+
+def test_read_sensors_unknown_version_only_fixed():
+    s = read_sensors(b"\x11" * 0x800, 0xDEADBEEF)
+    assert s.stapm_limit is not None
+    assert s.tctl_temp is None
+    assert s.socket_power is None

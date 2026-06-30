@@ -1,5 +1,5 @@
 from unittest.mock import patch, mock_open
-from zenmaster.hardware import detect, _parse_cpuinfo, _resolve_codename, _cpu_type
+from zenmaster.hardware import detect, resolve, _parse_cpuinfo, _resolve_codename, _cpu_type
 
 CPUINFO_REMBRANDT = """processor\t: 0
 vendor_id\t: AuthenticAMD
@@ -84,6 +84,20 @@ def test_detect_linux():
     assert info.type == "Amd_Apu"
     assert info.cpu_family_int == 25
     assert info.cpu_model_int == 68
+
+
+def test_resolve_from_values():
+    info = resolve("AMD Ryzen 9 7950X", 25, 97)
+    assert info.family == "Raphael"
+    assert info.type == "Amd_Desktop_Cpu"
+    assert info.cpu_family_int == 25
+    assert info.cpu_model_int == 97
+
+
+def test_resolve_does_not_read_cpuinfo():
+    with patch("builtins.open", side_effect=AssertionError("must not read /proc/cpuinfo")):
+        info = resolve("AMD Ryzen 7 7840U", 25, 116)
+    assert info.family == "PhoenixPoint"
 
 
 def test_detect_windows():

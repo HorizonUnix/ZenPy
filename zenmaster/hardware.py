@@ -127,12 +127,7 @@ def _cpu_type(family: str, arch: str) -> str:
     return "Amd_Apu"
 
 
-def detect() -> CpuInfo:
-    if platform.system() == "Windows":
-        cpu_family_int, cpu_model_int, name = _parse_processor_identifier()
-    else:
-        cpu_family_int, cpu_model_int, name = _parse_cpuinfo()
-
+def resolve(name: str, cpu_family_int: int, cpu_model_int: int) -> CpuInfo:
     arch, family = _resolve_codename(name, cpu_family_int, cpu_model_int)
     t = _cpu_type(family, arch)
     return CpuInfo(
@@ -143,3 +138,11 @@ def detect() -> CpuInfo:
         cpu_family_int=cpu_family_int,
         cpu_model_int=cpu_model_int,
     )
+
+
+def detect() -> CpuInfo:
+    if platform.system() == "Windows":
+        cpu_family_int, cpu_model_int, name = _parse_processor_identifier()
+    else:
+        cpu_family_int, cpu_model_int, name = _parse_cpuinfo()
+    return resolve(name, cpu_family_int, cpu_model_int)

@@ -1,8 +1,17 @@
 from __future__ import annotations
 import platform
+from dataclasses import dataclass
 from enum import IntEnum
 
 _IS_WINDOWS = platform.system() == "Windows"
+
+
+@dataclass
+class ModuleStatus:
+    ok: bool
+    version: str
+    min_version: str
+    reason: str | None
 
 
 class SmuStatus(IntEnum):
@@ -82,3 +91,78 @@ def read_pm_table_version(family: str = "") -> int:
     b = _backend()
     fn = getattr(b, "read_pm_table_version", None)
     return fn(family) if fn else 0
+
+
+def secure_boot_enabled() -> bool:
+    fn = getattr(_backend(), "secure_boot_enabled", None)
+    return fn() if fn else False
+
+
+def is_available() -> bool:
+    fn = getattr(_backend(), "is_available", None)
+    return fn() if fn else False
+
+
+def module_version() -> str:
+    fn = getattr(_backend(), "module_version", None)
+    return fn() if fn else "unknown"
+
+
+def module_version_ok() -> bool:
+    fn = getattr(_backend(), "module_version_ok", None)
+    return fn() if fn else False
+
+
+def module_status() -> ModuleStatus:
+    fn = getattr(_backend(), "module_status", None)
+    if fn:
+        return fn()
+    return ModuleStatus(ok=False, version="unknown", min_version="", reason="not_loaded")
+
+
+def ensure_backend() -> str | None:
+    b = active_backend()
+    if b is not None:
+        return b
+    from zenmaster.errors import ZenMasterError
+    try:
+        return init()
+    except ZenMasterError:
+        return None
+
+
+def read_pm_sensors(family: str = ""):
+    from zenmaster.table import read_sensors
+    ensure_backend()
+    data = read_pm_table(family)
+    if not data:
+        return None
+    return read_sensors(data, read_pm_table_version(family))
+
+
+def send_arg(family: str, name: str, value: int) -> list[tuple[str, int, int]]:
+    from zenmaster import runner
+    ensure_backend()
+    out: list[tuple[str, int, int]] = []
+    for is_mp1, op in runner.lookup(family, name):
+        try:
+            status = send_mp1(family, op, value) if is_mp1 else send_rsmu(family, op, value)
+        except Exception:
+            status = SMU_FAILED
+        out.append(("MP1" if is_mp1 else "RSMU", op, status))
+    return out
+
+
+def driver_name() -> str:
+    return getattr(_backend(), "DRIVER_NAME", "SMU driver")
+
+
+def unavailable_reason() -> str | None:
+    from zenmaster.errors import BackendUnavailable
+    if active_backend() is not None:
+        return None
+    try:
+        init()
+        return None
+    except BackendUnavailable as e:
+        return str(e)

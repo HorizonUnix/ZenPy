@@ -9,19 +9,61 @@ import time
 from zenmaster.errors import BackendUnavailable, SMUNotInitialized
 from zenmaster.pmtable import PM_TABLE_CMDS, TABLE_SIZES, DEFAULT_TABLE_SIZE
 from zenmaster.mailbox import MP1, MP1_DEFAULT, RSMU, RSMU_DEFAULT, NARGS
-from zenmaster.smu import SMU_OK, SMU_FAILED, SMU_REJECTED_PREREQ
+from zenmaster.smu import SMU_OK, SMU_FAILED, SMU_REJECTED_PREREQ, ModuleStatus
 
-DRIVER_PATH = "/sys/kernel/ryzen_smu_drv"
-SMN_PATH    = DRIVER_PATH + "/smn"
-PCI_CONFIG  = "/sys/bus/pci/devices/0000:00:00.0/config"
-NB_ADDR     = 0xB8
-NB_DATA     = 0xBC
+DRIVER_NAME  = "ryzen_smu"
+DRIVER_PATH  = "/sys/kernel/ryzen_smu_drv"
+SMN_PATH     = DRIVER_PATH + "/smn"
+VERSION_PATH = DRIVER_PATH + "/drv_version"
+PCI_CONFIG   = "/sys/bus/pci/devices/0000:00:00.0/config"
+NB_ADDR      = 0xB8
+NB_DATA      = 0xBC
+
+MIN_VERSION = (0, 1, 7)
 
 _POLL_N   = 100
 _SLEEP_S  = 0.0001
 _DEADLINE = 1.0
 _lock     = threading.Lock()
 _backend: str | None = None
+
+
+def version_str(v: tuple[int, ...]) -> str:
+    return ".".join(str(x) for x in v)
+
+
+def _parse_version(s: str) -> tuple[int, ...]:
+    s = s.strip().lstrip("v")
+    try:
+        return tuple(int(x) for x in s.split("."))
+    except ValueError:
+        return (0,)
+
+
+def module_version() -> str:
+    try:
+        with open(VERSION_PATH) as f:
+            return f.read().strip()
+    except OSError:
+        return "unknown"
+
+
+def module_version_ok() -> bool:
+    return _parse_version(module_version()) >= MIN_VERSION
+
+
+def module_status() -> ModuleStatus:
+    minv = version_str(MIN_VERSION)
+    if not os.path.isdir(DRIVER_PATH) and not os.path.exists(VERSION_PATH):
+        return ModuleStatus(False, "unknown", minv, "not_loaded")
+    ver = module_version()
+    if module_version_ok():
+        return ModuleStatus(True, ver, minv, None)
+    return ModuleStatus(False, ver, minv, "unknown" if ver == "unknown" else "too_old")
+
+
+def is_available() -> bool:
+    return os.path.isdir(DRIVER_PATH) or active_backend() == "pci"
 
 
 def secure_boot_enabled() -> bool:
@@ -67,25 +109,25 @@ def init() -> str:
     if _backend is not None:
         return _backend
 
-    if os.path.isdir(DRIVER_PATH):
-        if not os.path.exists(SMN_PATH):
+    if secure_boot_enabled():
+        if not os.path.isdir(DRIVER_PATH):
             raise BackendUnavailable(
-                "ryzen_smu is loaded but the /smn interface is missing — "
-                "upgrade to ryzen_smu >= 0.1.7."
+                "Secure Boot is enabled, so PCI direct access is blocked and the "
+                "ryzen_smu module is required — but it is not loaded.\n"
+                "\n"
+                "Options:\n"
+                "1. Install ryzen_smu, sign it with a MOK key and enroll it:\n"
+                "https://github.com/amkillam/ryzen_smu\n"
+                "2. Disable Secure Boot in UEFI firmware settings."
+            )
+        if not module_version_ok() or not os.path.exists(SMN_PATH):
+            raise BackendUnavailable(
+                f"ryzen_smu {module_version()} is too old — "
+                f"upgrade to >= {version_str(MIN_VERSION)}.\n"
+                "https://github.com/amkillam/ryzen_smu"
             )
         _backend = "ryzen_smu"
         return _backend
-
-    if secure_boot_enabled():
-        raise BackendUnavailable(
-            "Secure Boot is enabled and ryzen_smu is not loaded.\n"
-            "Kernel lockdown mode also blocks PCI direct access, so there is no fallback.\n"
-            "\n"
-            "Options:\n"
-            "1. Sign the ryzen_smu module with a MOK key and enroll it:\n"
-            "https://github.com/amkillam/ryzen_smu\n"
-            "2. Disable Secure Boot in UEFI firmware settings."
-        )
 
     if _pci_writable():
         _backend = "pci"
@@ -93,18 +135,15 @@ def init() -> str:
 
     if os.path.exists(PCI_CONFIG):
         raise BackendUnavailable(
-            "PCI config space is present but not writable.\n"
-            "Run as root, and check that Secure Boot / kernel lockdown is off.\n"
-            "If Secure Boot must stay on, install and load ryzen_smu:\n"
-            "https://github.com/amkillam/ryzen_smu"
+            "Secure Boot is off, so ZenMaster uses PCI direct access, but the PCI "
+            "config space is not writable.\n"
+            "Run as root, and check that kernel lockdown is off."
         )
 
     raise BackendUnavailable(
-        "No SMU backend found.\n"
-        f"ryzen_smu module not loaded (expected: {DRIVER_PATH})\n"
+        "PCI direct access is not available.\n"
         f"PCI config not accessible (expected: {PCI_CONFIG})\n"
-        "Make sure you are running as root and the module is installed:\n"
-        "https://github.com/amkillam/ryzen_smu"
+        "Make sure you are running as root."
     )
 
 

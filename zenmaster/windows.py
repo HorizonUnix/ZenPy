@@ -9,8 +9,9 @@ import time
 from zenmaster.errors import BackendUnavailable, SMUNotInitialized
 from zenmaster.pmtable import PM_TABLE_CMDS, TABLE_SIZES, DEFAULT_TABLE_SIZE
 from zenmaster.mailbox import MP1, MP1_DEFAULT, RSMU, RSMU_DEFAULT, NARGS
-from zenmaster.smu import SMU_OK, SMU_FAILED, SMU_REJECTED_PREREQ
+from zenmaster.smu import SMU_OK, SMU_FAILED, SMU_REJECTED_PREREQ, ModuleStatus
 
+DRIVER_NAME = "PawnIO"
 _DEVICE_PATHS = [
     r"\\?\GLOBALROOT\Device\PawnIO",
     r"\\.\PawnIO",
@@ -44,6 +45,30 @@ def _pawnio_info() -> str | None:
             return ""
     except OSError:
         return None
+
+
+def secure_boot_enabled() -> bool:
+    return False
+
+
+def module_version() -> str:
+    info = _pawnio_info()
+    return info if info else "unknown"
+
+
+def module_version_ok() -> bool:
+    return _pawnio_info() is not None
+
+
+def module_status() -> ModuleStatus:
+    info = _pawnio_info()
+    if info is None:
+        return ModuleStatus(False, "unknown", "", "not_loaded")
+    return ModuleStatus(True, info or "unknown", "", None)
+
+
+def is_available() -> bool:
+    return _pawnio_info() is not None
 
 
 def _make_k32():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import math
 import struct
+from dataclasses import dataclass
 
 _VRM_V1 = {0x001E0001, 0x001E0002, 0x001E0003, 0x001E0004,
             0x001E0005, 0x001E000A, 0x001E0101}
@@ -73,10 +74,86 @@ _CCLK_BUSY: dict[int, int] = {
 }
 
 
+_SOCKET_POWER: dict[int, int] = {
+    0x00370000: 0x98, 0x00370001: 0x98, 0x00370002: 0x98, 0x00370003: 0x98,
+    0x00370004: 0x98, 0x00370005: 0x98,
+    0x00400001: 0x98, 0x00400002: 0x98, 0x00400003: 0x98,
+    0x00400004: 0x98, 0x00400005: 0x98,
+    0x003F0000: 0xA8,
+    0x005D0008: 0xD0, 0x005D0009: 0xD0, 0x005D000B: 0xD0,
+}
+_GFX_CLK: dict[int, int] = {
+    0x00370000: 0x5B4, 0x00370001: 0x5B4, 0x00370002: 0x5B4, 0x00370003: 0x5B4,
+    0x00370004: 0x5B4, 0x00370005: 0x5D0,
+    0x00400001: 0x60C, 0x00400002: 0x624, 0x00400003: 0x644,
+    0x00400004: 0x648, 0x00400005: 0x648,
+    0x003F0000: 0x388,
+    0x005D0008: 0x4C0, 0x005D0009: 0x4C0, 0x005D000B: 0x4C0,
+    0x0064020C: 0x558,
+}
+_GFX_TEMP: dict[int, int] = {
+    0x00370000: 0x5AC, 0x00370001: 0x5AC, 0x00370002: 0x5AC, 0x00370003: 0x5AC,
+    0x00370004: 0x5AC, 0x00370005: 0x5C8,
+    0x00400001: 0x604, 0x00400002: 0x61C, 0x00400003: 0x63C,
+    0x00400004: 0x640, 0x00400005: 0x640,
+    0x003F0000: 0x380,
+    0x005D0008: 0x4C8, 0x005D0009: 0x4C8, 0x005D000B: 0x4C8,
+    0x0064020C: 0x550,
+}
+_MEM_CLK: dict[int, int] = {
+    0x00370000: 0x5D4, 0x00370001: 0x5D4, 0x00370002: 0x5D4, 0x00370003: 0x5D4,
+    0x00370004: 0x5D4, 0x00370005: 0x5F0,
+    0x003F0000: 0x3C4,
+    0x00400004: 0x66C, 0x00400005: 0x66C,
+    0x005D0008: 0x4EC, 0x005D0009: 0x4EC, 0x005D000B: 0x4EC,
+}
+
+
 def _f(data: bytes, off: int | None) -> float:
     if off is None or off + 4 > len(data):
         return math.nan
     return struct.unpack_from("<f", data, off)[0]
+
+
+@dataclass
+class PmSensors:
+    stapm_limit: float | None = None
+    stapm_value: float | None = None
+    fast_limit: float | None = None
+    fast_value: float | None = None
+    slow_limit: float | None = None
+    slow_value: float | None = None
+    tctl_temp: float | None = None
+    cclk_busy: float | None = None
+    socket_power: float | None = None
+    gfx_clk: float | None = None
+    gfx_temp: float | None = None
+    mem_clk: float | None = None
+
+
+def read_sensors(data: bytes, ver: int) -> PmSensors:
+    def f(off):
+        v = _f(data, off)
+        return None if math.isnan(v) else v
+
+    if ver in _TCTL_V1:
+        tctl = 0x5C
+    elif ver in _TCTL_V2:
+        tctl = 0x44
+    else:
+        tctl = None
+
+    return PmSensors(
+        stapm_limit=f(0x00), stapm_value=f(0x04),
+        fast_limit=f(0x08),  fast_value=f(0x0C),
+        slow_limit=f(0x10),  slow_value=f(0x14),
+        tctl_temp=f(tctl),
+        cclk_busy=f(_CCLK_BUSY.get(ver)),
+        socket_power=f(_SOCKET_POWER.get(ver)),
+        gfx_clk=f(_GFX_CLK.get(ver)),
+        gfx_temp=f(_GFX_TEMP.get(ver)),
+        mem_clk=f(_MEM_CLK.get(ver)),
+    )
 
 
 def read_table(data: bytes, ver: int) -> list[tuple[str, float, str]]:

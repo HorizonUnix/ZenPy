@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zenmaster"
-version = "0.3.0"
+version = "0.4.0"
 requires-python = ">=3.10"
 description = "Adjust power management settings for Ryzen CPUs on Linux and Windows"
 readme = "README.md"

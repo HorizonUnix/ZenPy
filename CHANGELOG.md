@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.4.0] - 2026-06-30
+
+### Added
+- CLI `--sensors` (and `--sensors --json`): compact live readout of temp, load, socket power, iGPU clock/temp, and memory clock
+- CLI `--info` now shows a `Driver` line with the driver name, version, and status (or `PCI direct access`); same data under `--info --json`
+- `smu.read_pm_sensors(family)` reads and decodes the PM table in one call, returning a `PmSensors` (or `None`). `table.read_sensors(data, ver)` decodes raw bytes you already have
+- `smu.module_status()` returns one `ModuleStatus` verdict for the driver (`ok`, `version`, `min_version`, `reason`). Helpers: `module_version()`, `module_version_ok()`, `is_available()`, `secure_boot_enabled()`, `driver_name()`
+- `smu.ensure_backend()`: like `init()` but returns the backend or `None` instead of raising
+- `smu.unavailable_reason()`: the message explaining why the SMU can't be used, or `None` when it can
+- `smu.send_arg(family, name, value)` sends one value to every mailbox the arg maps to, returning `[(mailbox, opcode, status), ...]`
+- `resolve(name, cpu_family, cpu_model)` builds a `CpuInfo` from explicit values without reading `/proc/cpuinfo`
+- `runner.is_supported(family)`
+- All of the above are re-exported at the top level, so apps don't import from `zenmaster.linux`
+
+### Changed
+- Linux now checks the `ryzen_smu` version (`drv_version`) and requires `>= 0.1.7`, with the installed version in the error
+- Backend selection follows Secure Boot: off uses PCI direct access, on uses `ryzen_smu`. A loaded module is no longer preferred over PCI when Secure Boot is off
+- On Windows, the driver is PawnIO with no version requirement, and Secure Boot does not apply
+
 ## [0.3.0] - 2026-06-30
 
 ### Added

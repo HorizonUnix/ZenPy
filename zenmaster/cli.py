@@ -6,6 +6,7 @@ import platform
 import struct
 import sys
 import time
+from dataclasses import asdict
 
 from zenmaster import __version__, runner, smu
 from zenmaster.apply import apply
@@ -191,6 +192,7 @@ def _show_help(info: CpuInfo) -> None:
     print("  --version        Show version and check PyPI for a newer release")
     if smu.pm_table_supported(info.family):
         print("  --table          Show labeled power metrics table")
+        print("  --sensors        Show key live sensors (temp, load, power, clocks)")
         print("  --dump-table     Dump raw PM table floats with hex offsets")
     print()
 
@@ -240,9 +242,25 @@ def _show_update(json_out: bool) -> None:
         print("You are on the latest version.")
 
 
+def _driver_line(backend: str | None) -> str:
+    if backend == "pci":
+        return "PCI direct access"
+    st = smu.module_status()
+    drv = smu.driver_name()
+    ver = "" if st.version == "unknown" else f" {st.version}"
+    if st.reason == "not_loaded":
+        return f"{drv} (not loaded)"
+    if st.ok:
+        return f"{drv}{ver} (OK)"
+    if st.reason == "too_old":
+        return f"{drv}{ver} — too old (need {st.min_version})"
+    return f"{drv}{ver} — version unknown"
+
+
 def _show_info(info: CpuInfo, backend: str | None, json_out: bool) -> None:
     socket = runner.get_socket(info.family) or "unknown"
     if json_out:
+        st = smu.module_status()
         print(json.dumps({
             "name": info.name,
             "family": info.family,
@@ -250,6 +268,13 @@ def _show_info(info: CpuInfo, backend: str | None, json_out: bool) -> None:
             "type": info.type,
             "socket": socket,
             "backend": backend,
+            "driver": {
+                "name": smu.driver_name(),
+                "version": st.version,
+                "min_version": st.min_version,
+                "ok": st.ok,
+                "reason": st.reason,
+            },
             "cpu_family_int": info.cpu_family_int,
             "cpu_model_int": info.cpu_model_int,
         }, indent=2))
@@ -259,6 +284,7 @@ def _show_info(info: CpuInfo, backend: str | None, json_out: bool) -> None:
         print(f"Type   : {info.type}")
         print(f"Socket : {socket}")
         print(f"Backend: {backend or 'not initialized'}")
+        print(f"Driver : {_driver_line(backend)}")
 
 
 def _format_results(results: list[dict], info: CpuInfo, backend: str | None,
@@ -342,6 +368,36 @@ def _show_table(json_out: bool, family: str = "") -> None:
         print(sep)
 
 
+_SENSOR_ROWS = [
+    ("CPU Temp",     "tctl_temp",    "°C"),
+    ("CPU Load",     "cclk_busy",    "%"),
+    ("Socket Power", "socket_power", "W"),
+    ("STAPM Value",  "stapm_value",  "W"),
+    ("iGPU Clock",   "gfx_clk",      "MHz"),
+    ("iGPU Temp",    "gfx_temp",     "°C"),
+    ("Mem Clock",    "mem_clk",      "MHz"),
+]
+
+
+def _show_sensors(json_out: bool, family: str = "") -> None:
+    sensors = smu.read_pm_sensors(family)
+    if sensors is None:
+        msg = "PM table not available on this platform/family"
+        if json_out:
+            print(json.dumps({"error": msg}))
+        else:
+            print(f"ZenMaster: {msg}", file=sys.stderr)
+        sys.exit(1)
+
+    if json_out:
+        print(json.dumps(asdict(sensors), indent=2))
+    else:
+        for label, field, unit in _SENSOR_ROWS:
+            value = getattr(sensors, field)
+            if value is not None:
+                print(f"{label:<12}: {value:8.1f} {unit}")
+
+
 def _dump_pm_table(json_out: bool, family: str = "") -> None:
     data = _require_pm_table(json_out, family)
     count = len(data) // 4
@@ -374,6 +430,7 @@ def main() -> None:
     p.add_argument("--reapply",      type=int, default=0, metavar="SECONDS")
     p.add_argument("--dump-table",   action="store_true", dest="dump_table")
     p.add_argument("--table",        action="store_true")
+    p.add_argument("--sensors",      action="store_true")
     p.add_argument("--version",      action="store_true")
     flags, rest = p.parse_known_args(argv)
 
@@ -407,10 +464,10 @@ def main() -> None:
                 if not flags.json_out:
                     print(f"ZenMaster: backend unavailable: {e}", file=sys.stderr)
         _show_info(info, backend, flags.json_out)
-        if not rest and not flags.dump_table and not flags.table:
+        if not rest and not flags.dump_table and not flags.table and not flags.sensors:
             sys.exit(0)
 
-    if (flags.table or flags.dump_table or rest) and backend is None:
+    if (flags.table or flags.dump_table or flags.sensors or rest) and backend is None:
         if not _is_root():
             print("ZenMaster: root/admin privileges required.", file=sys.stderr)
             print("Run with sudo (Linux) or as Administrator (Windows).", file=sys.stderr)
@@ -423,11 +480,16 @@ def main() -> None:
 
     if flags.table:
         _show_table(flags.json_out, info.family)
-        if not rest and not flags.dump_table:
+        if not rest and not flags.dump_table and not flags.sensors:
             sys.exit(0)
 
     if flags.dump_table:
         _dump_pm_table(flags.json_out, info.family)
+        if not rest and not flags.sensors:
+            sys.exit(0)
+
+    if flags.sensors:
+        _show_sensors(flags.json_out, info.family)
         if not rest:
             sys.exit(0)
 
