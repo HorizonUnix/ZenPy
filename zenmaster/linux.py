@@ -26,6 +26,7 @@ _SLEEP_S  = 0.0001
 _DEADLINE = 1.0
 _lock     = threading.Lock()
 _backend: str | None = None
+_fd: int | None = None
 
 
 def version_str(v: tuple[int, ...]) -> str:
@@ -52,9 +53,25 @@ def module_version_ok() -> bool:
     return _parse_version(module_version()) >= MIN_VERSION
 
 
+def _modinfo() -> str | None:
+    try:
+        result = subprocess.run(
+            ["modinfo", DRIVER_NAME],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
 def module_status() -> ModuleStatus:
     minv = version_str(MIN_VERSION)
     if not os.path.isdir(DRIVER_PATH) and not os.path.exists(VERSION_PATH):
+        out = _modinfo()
+        if out is None:
+            return ModuleStatus(False, "unknown", minv, "not_installed")
+        if "sig_id:" not in out and "signer:" not in out:
+            return ModuleStatus(False, "unknown", minv, "unsigned")
         return ModuleStatus(False, "unknown", minv, "not_loaded")
     ver = module_version()
     if module_version_ok():
@@ -113,7 +130,7 @@ def init() -> str:
         if not os.path.isdir(DRIVER_PATH):
             raise BackendUnavailable(
                 "Secure Boot is enabled, so PCI direct access is blocked and the "
-                "ryzen_smu module is required — but it is not loaded.\n"
+                "ryzen_smu module is required, but it is not loaded.\n"
                 "\n"
                 "Options:\n"
                 "1. Install ryzen_smu, sign it with a MOK key and enroll it:\n"
@@ -122,7 +139,7 @@ def init() -> str:
             )
         if not module_version_ok() or not os.path.exists(SMN_PATH):
             raise BackendUnavailable(
-                f"ryzen_smu {module_version()} is too old — "
+                f"ryzen_smu {module_version()} is too old, "
                 f"upgrade to >= {version_str(MIN_VERSION)}.\n"
                 "https://github.com/amkillam/ryzen_smu"
             )
@@ -198,35 +215,41 @@ def _send_seq(write, read, fd: int, msg: int, rsp: int, args: int, op: int, arg0
     return SMU_FAILED
 
 
-def _backend_io() -> tuple:
+def _require_init() -> None:
     if _backend is None:
-        raise SMUNotInitialized("SMU not initialized — call smu.init() first")
+        raise SMUNotInitialized("SMU not initialized, call smu.init() first")
+
+
+def _io_primitives() -> tuple:
     if _backend == "ryzen_smu":
         return _smn_write, _smn_read, SMN_PATH
     return _pci_write, _pci_read, PCI_CONFIG
 
 
+def _get_fd(path: str) -> int:
+    global _fd
+    if _fd is None:
+        _fd = os.open(path, os.O_RDWR)
+    return _fd
+
+
 def _send(table: dict, default: tuple, family: str, op: int, arg0: int) -> int:
+    _require_init()
     msg, rsp, args = table.get(family, default)
-    write, read, path = _backend_io()
+    write, read, path = _io_primitives()
     with _lock:
-        fd = os.open(path, os.O_RDWR)
-        try:
-            return _send_seq(write, read, fd, msg, rsp, args, op, arg0)
-        finally:
-            os.close(fd)
+        fd = _get_fd(path)
+        return _send_seq(write, read, fd, msg, rsp, args, op, arg0)
 
 
 def _query(table: dict, default: tuple, family: str, op: int, arg0: int) -> tuple[int, list[int]]:
+    _require_init()
     msg, rsp, args = table.get(family, default)
-    write, read, path = _backend_io()
+    write, read, path = _io_primitives()
     with _lock:
-        fd = os.open(path, os.O_RDWR)
-        try:
-            status = _send_seq(write, read, fd, msg, rsp, args, op, arg0)
-            return status, [read(fd, args + i * 4) for i in range(NARGS)]
-        finally:
-            os.close(fd)
+        fd = _get_fd(path)
+        status = _send_seq(write, read, fd, msg, rsp, args, op, arg0)
+        return status, [read(fd, args + i * 4) for i in range(NARGS)]
 
 
 def send_mp1(family: str, op: int, arg0: int = 0) -> int:
@@ -303,6 +326,15 @@ def _read_pm_table_pci(family: str) -> tuple[bytes, int] | None:
     return (data, ver) if data is not None else None
 
 
+def read_pm_table_full(family: str = "") -> tuple[bytes, int] | None:
+    if _backend == "pci":
+        return _read_pm_table_pci(family)
+    data = read_pm_table(family)
+    if data is None:
+        return None
+    return data, read_pm_table_version(family)
+
+
 def read_pm_table_version(family: str = "") -> int:
     if _backend == "pci":
         r = _read_pm_table_pci(family)
@@ -331,3 +363,14 @@ def read_pm_table(family: str = "") -> bytes | None:
             return f.read(size)
     except (OSError, ValueError):
         return None
+
+
+def close() -> None:
+    global _backend, _fd
+    if _fd is not None:
+        try:
+            os.close(_fd)
+        except OSError:
+            pass
+        _fd = None
+    _backend = None

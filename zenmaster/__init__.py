@@ -7,8 +7,10 @@ from zenmaster.update import check_update
 from zenmaster.table import PmSensors, read_sensors
 from zenmaster.smu import (
     SmuStatus, ModuleStatus, module_status, module_version, module_version_ok,
-    secure_boot_enabled, is_available, ensure_backend, read_pm_sensors,
-    send_arg, unavailable_reason, driver_name,
+    secure_boot_enabled, is_available, init, close, ensure_backend, read_pm_sensors,
+    send_arg, unavailable_reason, driver_name, active_backend, pm_table_supported,
+    send_mp1, send_rsmu, query_mp1, query_rsmu,
+    read_pm_table, read_pm_table_version, read_pm_table_full,
 )
 from zenmaster.errors import (
     ZenMasterError, BackendUnavailable, SMUNotInitialized, UnsupportedCPU,
@@ -23,7 +25,9 @@ __all__ = [
     "CpuInfo", "detect", "resolve", "apply", "ApplyResult", "runner", "smu", "table",
     "SmuStatus", "PmSensors", "read_sensors", "read_pm_sensors", "ModuleStatus",
     "module_status", "module_version", "module_version_ok", "secure_boot_enabled",
-    "is_available", "ensure_backend", "send_arg", "unavailable_reason", "driver_name",
+    "is_available", "init", "close", "ensure_backend", "send_arg", "unavailable_reason",
+    "driver_name", "active_backend", "pm_table_supported", "send_mp1", "send_rsmu",
+    "query_mp1", "query_rsmu", "read_pm_table", "read_pm_table_version", "read_pm_table_full",
     "check_update", "ZenMasterError", "BackendUnavailable", "SMUNotInitialized",
     "UnsupportedCPU", "__version__",
 ]

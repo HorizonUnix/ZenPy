@@ -66,27 +66,27 @@ _ARG_UNITS: dict[str, str] = {
 }
 
 _ARG_DESCS: dict[str, str] = {
-    "stapm-limit":               "Sustained Power Limit — STAPM LIMIT",
-    "fast-limit":                "Actual Power Limit — PPT LIMIT FAST",
-    "slow-limit":                "Average Power Limit — PPT LIMIT SLOW",
+    "stapm-limit":               "Sustained Power Limit (STAPM LIMIT)",
+    "fast-limit":                "Actual Power Limit (PPT LIMIT FAST)",
+    "slow-limit":                "Average Power Limit (PPT LIMIT SLOW)",
     "ppt-limit":                 "Platform Package Tracking power limit",
-    "apu-slow-limit":            "APU PPT Slow limit for A+A dGPU platform — PPT LIMIT APU",
+    "apu-slow-limit":            "APU PPT Slow limit for A+A dGPU platform (PPT LIMIT APU)",
     "stapm-time":                "STAPM constant time",
     "slow-time":                 "Slow PPT constant time",
-    "tctl-temp":                 "Tctl Temperature Limit — THM LIMIT CORE",
+    "tctl-temp":                 "Tctl Temperature Limit (THM LIMIT CORE)",
     "chtc-temp":                 "CHTC Temperature Limit",
-    "apu-skin-temp":             "APU Skin Temperature Limit — STT LIMIT APU",
-    "dgpu-skin-temp":            "dGPU Skin Temperature Limit — STT LIMIT dGPU",
+    "apu-skin-temp":             "APU Skin Temperature Limit (STT LIMIT APU)",
+    "dgpu-skin-temp":            "dGPU Skin Temperature Limit (STT LIMIT dGPU)",
     "skin-temp-limit":           "Skin Temperature Power Limit",
-    "tdc-limit":                 "Thermal Design Current Limit — TDC LIMIT",
-    "edc-limit":                 "Electrical Design Current Limit — EDC LIMIT",
-    "vrm-current":               "VRM Current Limit — TDC LIMIT VDD",
-    "vrmmax-current":            "VRM Maximum Current Limit — EDC LIMIT VDD",
-    "vrmsoc-current":            "VRM SoC Current Limit — TDC LIMIT SOC",
-    "vrmsocmax-current":         "VRM SoC Maximum Current Limit — EDC LIMIT SOC",
-    "vrmcvip-current":           "VRM CVIP Current Limit — TDC LIMIT CVIP (VanGogh only)",
-    "vrmgfx-current":            "VRM GFX Current Limit — TDC LIMIT GFX",
-    "vrmgfxmax-current":         "VRM GFX Maximum Current Limit — EDC LIMIT GFX",
+    "tdc-limit":                 "Thermal Design Current Limit (TDC LIMIT)",
+    "edc-limit":                 "Electrical Design Current Limit (EDC LIMIT)",
+    "vrm-current":               "VRM Current Limit (TDC LIMIT VDD)",
+    "vrmmax-current":            "VRM Maximum Current Limit (EDC LIMIT VDD)",
+    "vrmsoc-current":            "VRM SoC Current Limit (TDC LIMIT SOC)",
+    "vrmsocmax-current":         "VRM SoC Maximum Current Limit (EDC LIMIT SOC)",
+    "vrmcvip-current":           "VRM CVIP Current Limit (TDC LIMIT CVIP, VanGogh only)",
+    "vrmgfx-current":            "VRM GFX Current Limit (TDC LIMIT GFX)",
+    "vrmgfxmax-current":         "VRM GFX Maximum Current Limit (EDC LIMIT GFX)",
     "psi0-current":              "PSI0 VDD Current Limit",
     "psi0soc-current":           "PSI0 SoC Current Limit",
     "psi3cpu-current":           "PSI3 CPU Current Limit",
@@ -181,7 +181,7 @@ def _show_help(info: CpuInfo) -> None:
     supported_list = runner.get_supported_args(info.family)
     supported = set(supported_list)
     socket = runner.get_socket(info.family) or "unknown"
-    print("ZenMaster — Ryzen Power Management Tool")
+    print("ZenMaster (Ryzen Power Management Tool)")
     print()
     print("Usage: zenmaster [OPTIONS] [TUNING ARGS...]")
     print()
@@ -255,8 +255,8 @@ def _driver_line(backend: str | None) -> str:
     if st.ok:
         return f"{drv}{ver} (OK)"
     if st.reason == "too_old":
-        return f"{drv}{ver} — too old (need {st.min_version})"
-    return f"{drv}{ver} — version unknown"
+        return f"{drv}{ver} (too old, need {st.min_version})"
+    return f"{drv}{ver} (version unknown)"
 
 
 def _show_info(info: CpuInfo, backend: str | None, json_out: bool) -> None:
@@ -270,6 +270,7 @@ def _show_info(info: CpuInfo, backend: str | None, json_out: bool) -> None:
             "socket": socket,
             "cpu_family_int": info.cpu_family_int,
             "cpu_model_int": info.cpu_model_int,
+            "cpu_stepping_int": info.cpu_stepping_int,
         }
         if backend is not None:
             st = smu.module_status()
@@ -344,7 +345,7 @@ def _pm_unavailable_msg(family: str = "") -> str:
     return "PM table not available on this platform/family"
 
 
-def _require_pm_table(json_out: bool, family: str = "") -> bytes:
+def _require_pm_table(json_out: bool, family: str = "") -> tuple[bytes, int]:
     if not smu.pm_table_supported(family):
         msg = _pm_unavailable_msg(family)
         if json_out:
@@ -352,20 +353,19 @@ def _require_pm_table(json_out: bool, family: str = "") -> bytes:
         else:
             print(f"ZenMaster: {msg}", file=sys.stderr)
         sys.exit(1)
-    data = smu.read_pm_table(family)
-    if not data:
+    r = smu.read_pm_table_full(family)
+    if not r:
         msg = "Failed to read PM table"
         if json_out:
             print(json.dumps({"error": msg}))
         else:
             print(f"ZenMaster: {msg}", file=sys.stderr)
         sys.exit(1)
-    return data
+    return r
 
 
 def _show_table(json_out: bool, family: str = "") -> None:
-    data = _require_pm_table(json_out, family)
-    ver  = smu.read_pm_table_version(family)
+    data, ver = _require_pm_table(json_out, family)
     rows = read_table(data, ver)
 
     if json_out:
@@ -415,7 +415,7 @@ def _show_sensors(json_out: bool, family: str = "") -> None:
 
 
 def _dump_pm_table(json_out: bool, family: str = "") -> None:
-    data = _require_pm_table(json_out, family)
+    data, _ver = _require_pm_table(json_out, family)
     count = len(data) // 4
     values = list(struct.unpack(f"<{count}f", data[:count * 4]))
 
@@ -474,6 +474,11 @@ def main() -> None:
             if name not in known or ("=" not in token and not runner.is_flag_arg(name)):
                 _show_help(info)
                 sys.exit(0)
+
+    if not (flags.info or flags.table or flags.dump_table or flags.sensors or rest):
+        print("ZenMaster: nothing to do, no action flag or tuning args given.\n", file=sys.stderr)
+        _show_help(info)
+        sys.exit(1)
 
     backend: str | None = None
 

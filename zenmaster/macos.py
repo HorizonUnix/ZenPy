@@ -1,13 +1,15 @@
 from __future__ import annotations
 import threading
-import time
 
 from zenmaster import directhw, iokit
 from zenmaster.hardware import _sysctl_str
 from zenmaster.errors import BackendUnavailable, SMUNotInitialized
 from zenmaster.pmtable import PM_TABLE_CMDS, TABLE_SIZES, DEFAULT_TABLE_SIZE
-from zenmaster.mailbox import MP1, MP1_DEFAULT, RSMU, RSMU_DEFAULT, NARGS
-from zenmaster.smu import SMU_OK, SMU_FAILED, SMU_REJECTED_PREREQ, ModuleStatus
+from zenmaster.mailbox import (
+    MP1, MP1_DEFAULT, RSMU, RSMU_DEFAULT,
+    mailbox_send, mailbox_query, transfer_with_retry,
+)
+from zenmaster.smu import SMU_OK, ModuleStatus
 
 DRIVER_NAME = "DirectHW"
 
@@ -97,7 +99,7 @@ def init() -> str:
         lines.append(f"   {_KEXT_URL}")
     lines += [
         "   Hackintosh: set SIP csr-active-config to 03080000 to allow kexts.",
-        "2. Use the kext-free IOPCIBridge path (tuning only — no PM-table sensors):",
+        "2. Use the kext-free IOPCIBridge path (tuning only, no PM-table sensors):",
         "   run as root (sudo) and add the boot-arg debug=0x144.",
     ]
     raise BackendUnavailable("\n".join(lines))
@@ -136,41 +138,19 @@ def _smn_write(addr: int, value: int) -> None:
     _pci_cfg_write(NB_DATA, value)
 
 
-def _poll_response(rsp: int) -> int:
-    for i in range(_POLL_N):
-        r = _smn_read(rsp)
-        if r:
-            return r
-        if i >= _FAST_POLL:
-            time.sleep(_POLL_SLEEP)
-    return 0
-
-
 def _mailbox_send(msg: int, rsp: int, args_addr: int, op: int, arg0: int) -> int:
-    _smn_write(rsp, 0)
-    _smn_write(args_addr, arg0)
-    for i in range(1, NARGS):
-        _smn_write(args_addr + i * 4, 0)
-    _smn_write(msg, op)
-    return _poll_response(rsp) or SMU_FAILED
+    return mailbox_send(_smn_write, _smn_read, msg, rsp, args_addr, op, arg0,
+                         _POLL_N, _FAST_POLL, _POLL_SLEEP)
 
 
 def _mailbox_query(msg: int, rsp: int, args_base: int, op: int, arg0: int = 0) -> tuple[int, list[int]]:
-    _smn_write(rsp, 0)
-    for i in range(NARGS):
-        _smn_write(args_base + i * 4, 0)
-    if arg0:
-        _smn_write(args_base, arg0)
-    _smn_write(msg, op)
-    r = _poll_response(rsp)
-    if r:
-        return r, [_smn_read(args_base + i * 4) for i in range(NARGS)]
-    return SMU_FAILED, [0] * NARGS
+    return mailbox_query(_smn_write, _smn_read, msg, rsp, args_base, op, arg0,
+                          _POLL_N, _FAST_POLL, _POLL_SLEEP)
 
 
 def _require_init() -> None:
     if _backend is None:
-        raise SMUNotInitialized("SMU not initialized — call smu.init() first")
+        raise SMUNotInitialized("SMU not initialized, call smu.init() first")
 
 
 def _send(table: dict, default: tuple, family: str, op: int, arg0: int) -> int:
@@ -209,28 +189,13 @@ def pm_table_supported(family: str = "") -> bool:
 
 def _transfer_with_retry(msg: int, rsp: int, args_base: int, op: int, arg0: int = 0,
                          delays: tuple[float, ...] = (0.01, 0.1)) -> int:
-    with _lock:
-        status = _mailbox_send(msg, rsp, args_base, op, arg0)
-    for delay in delays:
-        if status != SMU_REJECTED_PREREQ:
-            break
-        time.sleep(delay)
+    def once():
         with _lock:
-            status = _mailbox_send(msg, rsp, args_base, op, arg0)
-    return status
+            return _mailbox_send(msg, rsp, args_base, op, arg0)
+    return transfer_with_retry(once, delays)
 
 
-def read_pm_table_version(family: str = "") -> int:
-    if _backend in (None, "iopci") or family not in PM_TABLE_CMDS:
-        return 0
-    ver_op = PM_TABLE_CMDS[family][0]
-    msg, rsp, args_base = RSMU.get(family, RSMU_DEFAULT)
-    with _lock:
-        status, out = _mailbox_query(msg, rsp, args_base, ver_op)
-    return out[0] if status == SMU_OK else 0
-
-
-def read_pm_table(family: str = "") -> bytes | None:
+def read_pm_table_full(family: str = "") -> tuple[bytes, int] | None:
     if _backend in (None, "iopci") or family not in PM_TABLE_CMDS:
         return None
     ver_op, addr_op, transfer_op, addr_64bit, extra = PM_TABLE_CMDS[family]
@@ -240,7 +205,8 @@ def read_pm_table(family: str = "") -> bytes | None:
         status, out = _mailbox_query(msg, rsp, args_base, ver_op)
     if status != SMU_OK or not out[0]:
         return None
-    size = TABLE_SIZES.get(out[0], DEFAULT_TABLE_SIZE)
+    ver = out[0]
+    size = TABLE_SIZES.get(ver, DEFAULT_TABLE_SIZE)
 
     with _lock:
         status, out = _mailbox_query(msg, rsp, args_base, addr_op, extra)
@@ -253,4 +219,22 @@ def read_pm_table(family: str = "") -> bytes | None:
     status = _transfer_with_retry(msg, rsp, args_base, transfer_op, extra)
     if status != SMU_OK:
         return None
-    return directhw.read_physical(phys_addr, size)
+    data = directhw.read_physical(phys_addr, size)
+    return (data, ver) if data is not None else None
+
+
+def read_pm_table_version(family: str = "") -> int:
+    r = read_pm_table_full(family)
+    return r[1] if r else 0
+
+
+def read_pm_table(family: str = "") -> bytes | None:
+    r = read_pm_table_full(family)
+    return r[0] if r else None
+
+
+def close() -> None:
+    global _backend
+    directhw.close()
+    iokit.close()
+    _backend = None

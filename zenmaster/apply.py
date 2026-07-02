@@ -52,6 +52,7 @@ def apply(args_str: str, family: str) -> tuple[list[ApplyResult], bool]:
                 value = int(val_str, 0)
             except ValueError:
                 results.append(_error(name, f"invalid value '{val_str}'"))
+                had_rejection = True
                 continue
 
         matches = runner.lookup(family, name)

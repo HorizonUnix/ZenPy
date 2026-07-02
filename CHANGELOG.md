@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.6.0] - 2026-07-02
+
+### Added
+- `CpuInfo.cpu_stepping_int` (defaults to `0`). `resolve()` takes it as an optional arg and `detect()` fills it in on all three platforms
+- `zenmaster.init()` re-exported at top level.
+- `smu.read_pm_table_full(family)`. Every backend was running the full mailbox sequence twice per `read_pm_sensors()` call: once for `read_pm_table()`, once again for `read_pm_table_version()`, because they were written as two separate functions that each redid the same version/address/transfer round trip. Now there's one fetch, and both older functions call into it.
+- Linux `ModuleStatus.reason` can be `not_installed` or `unsigned` now, not just `not_loaded`. Previously "never installed," "installed but unsigned," and "installed but idle" all collapsed into the same reason, so anyone consuming this had to shell out to `modinfo` themselves to tell them apart.
+- `smu.close()` (also at top level as `zenmaster.close()`) releases whatever the active backend is holding: the Windows PawnIO handle, macOS's DirectHW/IOKit connection, or the Linux SMU file descriptor. Nothing closed these before; a long-running process (a daemon that wants to drop and reacquire access) had no way to let go of them.
+- More of `smu`'s surface is re-exported at the top level: `active_backend`, `pm_table_supported`, `send_mp1`, `send_rsmu`, `query_mp1`, `query_rsmu`, `read_pm_table`, `read_pm_table_version`, `read_pm_table_full`. The CLI already needed all of these; now `import zenmaster` gets you the same surface without dropping down to `zenmaster.smu`.
+- `BackendUnavailable` now appends a link to the wiki's Installation guide to whatever message it's raised with. Every "PawnIO isn't installed" / "ryzen_smu is too old" / "DirectHW isn't loaded" error now points somewhere with the actual setup steps, instead of leaving you to go find them.
+
+### Removed
+- `AMDFamily0F.bin`, `AMDFamily10.bin`, `AMDFamily17.bin`, `AMDReset.bin`.
+
+### Changed
+- `send_arg()` raises `UnsupportedCPU` for a family with no SMU support.
+- `send_arg()` no longer swallows every exception as a hardware rejection. Only `OSError`, `struct.error`, and `ctypes.ArgumentError` count as SMU_FAILED now. A real bug in a backend used to look identical to the SMU just saying no.
+- CLI shows help instead of doing nothing when you run it with no action flag and no tuning args. `zenmaster --json` by itself used to just exit 0 silently.
+- `hardware.detect()` caches its result for the life of the process. It used to re-parse `/proc/cpuinfo`, `PROCESSOR_IDENTIFIER`, or `sysctl` and recompute the codename on every single call, which is why callers (U4L included) kept building their own memoization around it. `resolve()` is untouched and still takes whatever you pass it every time, since that's the one meant for feeding in values you didn't read off the real CPU.
+- The mailbox send/query/poll/retry logic that macOS and Windows each had their own near-identical copy of now lives once in `zenmaster/mailbox.py`. Linux already shared its two backends this way; the other two platforms didn't.
+- All three backends now check "has `init()` run yet" the same way: a bare `_require_init()` guard called at the top of `send_mp1`/`send_rsmu`/`query_mp1`/`query_rsmu`, raising `SMUNotInitialized` before any hardware I/O happens.
+
+### Fixed
+- Windows: the PawnIO registry lookup (`_pawnio_info`) was a separate registry read for `module_version()`, `module_version_ok()`, `module_status()`, and `is_available()` each. It's read once and cached now.
+- Windows: `read_pm_table_full` didn't check for a zero table version, unlike Linux and macOS, so a rejected version query could fall through and read from a garbage address instead of returning `None`.
+- `apply()` now counts an unparseable value (`--stapm-limit=notanumber`) as a rejection. It already returned an error result for this case, but `had_rejection` stayed `False`, so a caller only checking that flag would think the preset applied cleanly.
+
 ## [0.5.0] - 2026-07-01
 
 ### Added

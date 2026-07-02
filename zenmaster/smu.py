@@ -1,5 +1,7 @@
 from __future__ import annotations
+import ctypes
 import platform
+import struct
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -57,6 +59,12 @@ def init() -> str:
     return _backend().init()
 
 
+def close() -> None:
+    fn = getattr(_backend(), "close", None)
+    if fn:
+        fn()
+
+
 def active_backend() -> str | None:
     b = _backend()
     fn = getattr(b, "active_backend", None)
@@ -95,6 +103,17 @@ def read_pm_table_version(family: str = "") -> int:
     b = _backend()
     fn = getattr(b, "read_pm_table_version", None)
     return fn(family) if fn else 0
+
+
+def read_pm_table_full(family: str = "") -> tuple[bytes, int] | None:
+    b = _backend()
+    fn = getattr(b, "read_pm_table_full", None)
+    if fn:
+        return fn(family)
+    data = read_pm_table(family)
+    if not data:
+        return None
+    return data, read_pm_table_version(family)
 
 
 def secure_boot_enabled() -> bool:
@@ -138,20 +157,24 @@ def ensure_backend() -> str | None:
 def read_pm_sensors(family: str = ""):
     from zenmaster.table import read_sensors
     ensure_backend()
-    data = read_pm_table(family)
-    if not data:
+    r = read_pm_table_full(family)
+    if not r:
         return None
-    return read_sensors(data, read_pm_table_version(family))
+    data, ver = r
+    return read_sensors(data, ver)
 
 
 def send_arg(family: str, name: str, value: int) -> list[tuple[str, int, int]]:
     from zenmaster import runner
+    from zenmaster.errors import UnsupportedCPU
+    if not runner.is_supported(family):
+        raise UnsupportedCPU(f"'{family}' is not a supported CPU family")
     ensure_backend()
     out: list[tuple[str, int, int]] = []
     for is_mp1, op in runner.lookup(family, name):
         try:
             status = send_mp1(family, op, value) if is_mp1 else send_rsmu(family, op, value)
-        except Exception:
+        except (OSError, struct.error, ctypes.ArgumentError):
             status = SMU_FAILED
         out.append(("MP1" if is_mp1 else "RSMU", op, status))
     return out

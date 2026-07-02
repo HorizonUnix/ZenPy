@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zenmaster"
-version = "0.5.0"
+version = "0.6.0"
 requires-python = ">=3.10"
 description = "Adjust power management settings for Ryzen CPUs on Linux, Windows, and macOS"
 readme = "README.md"
@@ -44,4 +44,4 @@ where = ["."]
 include = ["zenmaster*"]
 
 [tool.setuptools.package-data]
-zenmaster = ["assets/AMD/PawnIO/*.bin", "py.typed"]
+zenmaster = ["RyzenSMU.bin", "py.typed"]

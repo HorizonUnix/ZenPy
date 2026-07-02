@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 import platform
 from dataclasses import dataclass
+from functools import lru_cache
 
 
 @dataclass
@@ -12,12 +13,13 @@ class CpuInfo:
     type: str
     cpu_family_int: int
     cpu_model_int: int
+    cpu_stepping_int: int = 0
 
 
-def _parse_cpuinfo() -> tuple[int, int, str]:
-    cpu_family = cpu_model = 0
+def _parse_cpuinfo() -> tuple[int, int, int, str]:
+    cpu_family = cpu_model = cpu_stepping = 0
     cpu_name = ""
-    seen_family = seen_model = False
+    seen_family = seen_model = seen_stepping = False
     try:
         with open("/proc/cpuinfo") as f:
             for line in f:
@@ -31,24 +33,32 @@ def _parse_cpuinfo() -> tuple[int, int, str]:
                 elif key == "model" and not seen_model:
                     cpu_model = int(val)
                     seen_model = True
+                elif key == "stepping" and not seen_stepping:
+                    cpu_stepping = int(val)
+                    seen_stepping = True
                 elif key == "model name" and not cpu_name:
                     cpu_name = val
-                if seen_family and seen_model and cpu_name:
+                if seen_family and seen_model and seen_stepping and cpu_name:
                     break
     except OSError:
         pass
-    return cpu_family, cpu_model, cpu_name
+    return cpu_family, cpu_model, cpu_stepping, cpu_name
 
 
-def _parse_processor_identifier() -> tuple[int, int, str]:
+def _parse_processor_identifier() -> tuple[int, int, int, str]:
     identifier = os.environ.get("PROCESSOR_IDENTIFIER", "")
     words = identifier.split()
-    cpu_family = cpu_model = 0
+    cpu_family = cpu_model = cpu_stepping = 0
     try:
         fi = words.index("Family") + 1
         mi = words.index("Model") + 1
         cpu_family = int(words[fi])
         cpu_model = int(words[mi].rstrip(","))
+    except (ValueError, IndexError):
+        pass
+    try:
+        si = words.index("Stepping") + 1
+        cpu_stepping = int(words[si].rstrip(","))
     except (ValueError, IndexError):
         pass
 
@@ -65,12 +75,23 @@ def _parse_processor_identifier() -> tuple[int, int, str]:
         pass
     if not cpu_name:
         cpu_name = identifier
-    return cpu_family, cpu_model, cpu_name
+    return cpu_family, cpu_model, cpu_stepping, cpu_name
+
+
+_libc = None
+
+
+def _libSystem():
+    global _libc
+    if _libc is None:
+        import ctypes
+        _libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    return _libc
 
 
 def _sysctl_str(name: str) -> str:
     import ctypes
-    libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    libc = _libSystem()
     size = ctypes.c_size_t(0)
     if libc.sysctlbyname(name.encode(), None, ctypes.byref(size), None, 0) != 0:
         return ""
@@ -82,7 +103,7 @@ def _sysctl_str(name: str) -> str:
 
 def _sysctl_int(name: str) -> int:
     import ctypes
-    libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    libc = _libSystem()
     val  = ctypes.c_uint64(0)
     size = ctypes.c_size_t(ctypes.sizeof(val))
     if libc.sysctlbyname(name.encode(), ctypes.byref(val), ctypes.byref(size), None, 0) != 0:
@@ -90,9 +111,14 @@ def _sysctl_int(name: str) -> int:
     return int(val.value)
 
 
-def _parse_sysctl() -> tuple[int, int, str]:
+def _parse_sysctl() -> tuple[int, int, int, str]:
     name = _sysctl_str("machdep.cpu.brand_string")
-    return _sysctl_int("machdep.cpu.family"), _sysctl_int("machdep.cpu.model"), name
+    return (
+        _sysctl_int("machdep.cpu.family"),
+        _sysctl_int("machdep.cpu.model"),
+        _sysctl_int("machdep.cpu.stepping"),
+        name,
+    )
 
 
 def _resolve_codename(cpu_name: str, cpu_family: int, cpu_model: int) -> tuple[str, str]:
@@ -154,7 +180,7 @@ def _cpu_type(family: str, arch: str) -> str:
     return "Amd_Apu"
 
 
-def resolve(name: str, cpu_family_int: int, cpu_model_int: int) -> CpuInfo:
+def resolve(name: str, cpu_family_int: int, cpu_model_int: int, cpu_stepping_int: int = 0) -> CpuInfo:
     arch, family = _resolve_codename(name, cpu_family_int, cpu_model_int)
     t = _cpu_type(family, arch)
     return CpuInfo(
@@ -164,15 +190,17 @@ def resolve(name: str, cpu_family_int: int, cpu_model_int: int) -> CpuInfo:
         type=t,
         cpu_family_int=cpu_family_int,
         cpu_model_int=cpu_model_int,
+        cpu_stepping_int=cpu_stepping_int,
     )
 
 
+@lru_cache(maxsize=1)
 def detect() -> CpuInfo:
     system = platform.system()
     if system == "Windows":
-        cpu_family_int, cpu_model_int, name = _parse_processor_identifier()
+        cpu_family_int, cpu_model_int, cpu_stepping_int, name = _parse_processor_identifier()
     elif system == "Darwin":
-        cpu_family_int, cpu_model_int, name = _parse_sysctl()
+        cpu_family_int, cpu_model_int, cpu_stepping_int, name = _parse_sysctl()
     else:
-        cpu_family_int, cpu_model_int, name = _parse_cpuinfo()
-    return resolve(name, cpu_family_int, cpu_model_int)
+        cpu_family_int, cpu_model_int, cpu_stepping_int, name = _parse_cpuinfo()
+    return resolve(name, cpu_family_int, cpu_model_int, cpu_stepping_int)

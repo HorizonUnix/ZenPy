@@ -4,12 +4,14 @@ import ctypes.wintypes
 import os
 import struct
 import threading
-import time
 
 from zenmaster.errors import BackendUnavailable, SMUNotInitialized
 from zenmaster.pmtable import PM_TABLE_CMDS, TABLE_SIZES, DEFAULT_TABLE_SIZE
-from zenmaster.mailbox import MP1, MP1_DEFAULT, RSMU, RSMU_DEFAULT, NARGS
-from zenmaster.smu import SMU_OK, SMU_FAILED, SMU_REJECTED_PREREQ, ModuleStatus
+from zenmaster.mailbox import (
+    MP1, MP1_DEFAULT, RSMU, RSMU_DEFAULT,
+    mailbox_send, mailbox_query, transfer_with_retry,
+)
+from zenmaster.smu import SMU_OK, ModuleStatus
 
 DRIVER_NAME = "PawnIO"
 _DEVICE_PATHS = [
@@ -28,11 +30,18 @@ _k32         = None
 _PAWNIO_INSTALLER_URL = "https://github.com/namazso/PawnIO.Setup/releases/latest/download/PawnIO_setup.exe"
 
 
-def _assets_dir() -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+_UNSET = object()
+_pawnio_info_cache = _UNSET
 
 
 def _pawnio_info() -> str | None:
+    global _pawnio_info_cache
+    if _pawnio_info_cache is _UNSET:
+        _pawnio_info_cache = _query_pawnio_info()
+    return _pawnio_info_cache
+
+
+def _query_pawnio_info() -> str | None:
     try:
         import winreg
         key = winreg.OpenKey(
@@ -105,7 +114,7 @@ def init() -> str:
     if _handle is not None:
         return "pawnio"
 
-    module_path = os.path.join(_assets_dir(), "AMD", "PawnIO", "RyzenSMU.bin")
+    module_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "RyzenSMU.bin")
     if not os.path.exists(module_path):
         raise BackendUnavailable(f"PawnIO module not found: {module_path}")
 
@@ -121,7 +130,7 @@ def init() -> str:
     handle = _open_device(k32)
     if handle is None:
         raise BackendUnavailable(
-            "PawnIO device not found — driver may need a reboot to activate.\n"
+            "PawnIO device not found. The driver may need a reboot to activate.\n"
             f"If not installed: {_PAWNIO_INSTALLER_URL}"
         )
 
@@ -159,9 +168,12 @@ def active_backend() -> str | None:
     return "pawnio" if _handle is not None else None
 
 
-def _execute(fn_name: str, in_args: list[int], out_count: int) -> list[int]:
+def _require_init() -> None:
     if _handle is None or _k32 is None:
-        raise SMUNotInitialized("PawnIO not initialized — call smu.init() first")
+        raise SMUNotInitialized("PawnIO not initialized, call smu.init() first")
+
+
+def _execute(fn_name: str, in_args: list[int], out_count: int) -> list[int]:
     fn_bytes = fn_name.encode("ascii")[:31]
     name_buf = struct.pack("32s", fn_bytes)
     args_buf = struct.pack(f"<{len(in_args)}q", *in_args) if in_args else b""
@@ -195,36 +207,14 @@ def _smn_write(addr: int, value: int) -> None:
     _execute("ioctl_write_smu_register", [addr, value], 0)
 
 
-def _poll_response(rsp: int) -> int:
-    for i in range(_POLL_N):
-        r = _smn_read(rsp)
-        if r:
-            return r
-        if i >= _FAST_POLL:
-            time.sleep(_POLL_SLEEP)
-    return 0
-
-
 def _mailbox_send(msg: int, rsp: int, args_addr: int, op: int, arg0: int) -> int:
-    _smn_write(rsp, 0)
-    _smn_write(args_addr, arg0)
-    for i in range(1, NARGS):
-        _smn_write(args_addr + i * 4, 0)
-    _smn_write(msg, op)
-    return _poll_response(rsp) or SMU_FAILED
+    return mailbox_send(_smn_write, _smn_read, msg, rsp, args_addr, op, arg0,
+                         _POLL_N, _FAST_POLL, _POLL_SLEEP)
 
 
 def _mailbox_query(msg: int, rsp: int, args_base: int, op: int, arg0: int = 0) -> tuple[int, list[int]]:
-    _smn_write(rsp, 0)
-    for i in range(NARGS):
-        _smn_write(args_base + i * 4, 0)
-    if arg0:
-        _smn_write(args_base, arg0)
-    _smn_write(msg, op)
-    r = _poll_response(rsp)
-    if r:
-        return r, [_smn_read(args_base + i * 4) for i in range(NARGS)]
-    return SMU_FAILED, [0] * NARGS
+    return mailbox_query(_smn_write, _smn_read, msg, rsp, args_base, op, arg0,
+                          _POLL_N, _FAST_POLL, _POLL_SLEEP)
 
 
 def _read_physical_memory(phys_addr: int, size: int) -> bytes | None:
@@ -237,24 +227,21 @@ def _read_physical_memory(phys_addr: int, size: int) -> bytes | None:
 
 def _transfer_with_retry(msg: int, rsp: int, args_base: int, op: int, arg0: int = 0,
                          delays: tuple[float, ...] = (0.01, 0.1)) -> int:
-    with _lock:
-        status = _mailbox_send(msg, rsp, args_base, op, arg0)
-    for delay in delays:
-        if status != SMU_REJECTED_PREREQ:
-            break
-        time.sleep(delay)
+    def once():
         with _lock:
-            status = _mailbox_send(msg, rsp, args_base, op, arg0)
-    return status
+            return _mailbox_send(msg, rsp, args_base, op, arg0)
+    return transfer_with_retry(once, delays)
 
 
 def _send(table: dict, default: tuple, family: str, op: int, arg0: int) -> int:
+    _require_init()
     msg, rsp, args = table.get(family, default)
     with _lock:
         return _mailbox_send(msg, rsp, args, op, arg0)
 
 
 def _query(table: dict, default: tuple, family: str, op: int, arg0: int) -> tuple[int, list[int]]:
+    _require_init()
     msg, rsp, args = table.get(family, default)
     with _lock:
         return _mailbox_query(msg, rsp, args, op, arg0)
@@ -280,17 +267,7 @@ def pm_table_supported(family: str = "") -> bool:
     return family in PM_TABLE_CMDS
 
 
-def read_pm_table_version(family: str = "") -> int:
-    if not _handle or family not in PM_TABLE_CMDS:
-        return 0
-    ver_op = PM_TABLE_CMDS[family][0]
-    msg, rsp, args_base = RSMU.get(family, RSMU_DEFAULT)
-    with _lock:
-        status, out = _mailbox_query(msg, rsp, args_base, ver_op)
-    return out[0] if status == SMU_OK else 0
-
-
-def read_pm_table(family: str = "") -> bytes | None:
+def read_pm_table_full(family: str = "") -> tuple[bytes, int] | None:
     if not _handle or family not in PM_TABLE_CMDS:
         return None
     ver_op, addr_op, transfer_op, addr_64bit, extra = PM_TABLE_CMDS[family]
@@ -298,9 +275,10 @@ def read_pm_table(family: str = "") -> bytes | None:
 
     with _lock:
         status, out = _mailbox_query(msg, rsp, args_base, ver_op)
-    if status != SMU_OK:
+    if status != SMU_OK or not out[0]:
         return None
-    size = TABLE_SIZES.get(out[0], DEFAULT_TABLE_SIZE)
+    ver = out[0]
+    size = TABLE_SIZES.get(ver, DEFAULT_TABLE_SIZE)
 
     with _lock:
         status, out = _mailbox_query(msg, rsp, args_base, addr_op, extra)
@@ -313,4 +291,24 @@ def read_pm_table(family: str = "") -> bytes | None:
     status = _transfer_with_retry(msg, rsp, args_base, transfer_op, extra)
     if status != SMU_OK:
         return None
-    return _read_physical_memory(phys_addr, size)
+    data = _read_physical_memory(phys_addr, size)
+    return (data, ver) if data is not None else None
+
+
+def read_pm_table_version(family: str = "") -> int:
+    r = read_pm_table_full(family)
+    return r[1] if r else 0
+
+
+def read_pm_table(family: str = "") -> bytes | None:
+    r = read_pm_table_full(family)
+    return r[0] if r else None
+
+
+def close() -> None:
+    global _handle, _k32, _pawnio_info_cache
+    if _handle is not None and _k32 is not None:
+        _k32.CloseHandle(ctypes.wintypes.HANDLE(_handle))
+    _handle = None
+    _k32 = None
+    _pawnio_info_cache = _UNSET

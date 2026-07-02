@@ -3,7 +3,10 @@ class ZenMasterError(RuntimeError):
 
 
 class BackendUnavailable(ZenMasterError):
-    pass
+    _INSTALL_DOCS = "https://github.com/HorizonUnix/ZenMaster/wiki/Installation"
+
+    def __init__(self, message: str):
+        super().__init__(f"{message}\n\nInstallation guide: {self._INSTALL_DOCS}")
 
 
 class SMUNotInitialized(ZenMasterError):
