@@ -1,12 +1,11 @@
 import os, sys, time, struct
-import zenmaster
-from zenmaster import smu
+from zenmaster import detect, smu
 
-# Ported from RyzenAdj's get_table_values monitor — a live dump of every PM
+# Ported from RyzenAdj's get_table_values monitor: a live dump of every PM
 # table float. ZenMaster reads the table fresh on each call, so there is no
 # separate refresh step.
 
-info = zenmaster.detect()
+info = detect()
 
 if smu.ensure_backend() is None:
     sys.exit("ZenMaster could not get initialized (run as root/admin)")

@@ -15,7 +15,7 @@ print(runner.lookup(info.family, "stapm-limit"))
 print(runner.is_flag_arg("enable-oc"))
 print(runner.is_flag_arg("stapm-limit"))
 
-# SMU init — raises RuntimeError with a clear message on any failure
+# SMU init raises RuntimeError with a clear message on any failure
 try:
     backend = smu.init()
     print("backend:", backend)
@@ -23,7 +23,7 @@ except RuntimeError as e:
     print(f"SMU unavailable: {e}", file=sys.stderr)
     sys.exit(1)
 
-# Apply a preset string — same syntax as the CLI
+# Apply a preset string, same syntax as the CLI
 results, rejected = apply("--stapm-limit=15000 --tctl-temp=90", info.family)
 for r in results:
     if r["error"]:
@@ -41,13 +41,13 @@ for r in results:
     if r["returned"] is not None:
         print(r["arg"], "=", r["returned"])
 
-# PM table — APU/mobile only (Renoir, Cezanne, Phoenix, etc.)
+# PM table: APU/mobile only (Renoir, Cezanne, Phoenix, etc.)
 if smu.pm_table_supported(info.family):
     data = smu.read_pm_table(info.family)
     ver = smu.read_pm_table_version(info.family)
     print(f"pm table: version=0x{ver:08X} size={len(data)}")
 
-# Raw SMU send — look up the opcode first, then send
+# Raw SMU send: look up the opcode first, then send
 for is_mp1, op in runner.lookup(info.family, "stapm-limit"):
     if is_mp1:
         rc = smu.send_mp1(info.family, op, 15000)

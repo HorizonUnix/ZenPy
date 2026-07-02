@@ -1,13 +1,12 @@
 import sys, time
-import zenmaster
-from zenmaster import smu
+from zenmaster import apply, detect, smu
 
-# Ported from RyzenAdj's get_fast_limit reapply loop — watch the live fast
-# limit and re-apply the whole preset whenever it drifts off 35 W.
+# Ported from RyzenAdj's get_fast_limit reapply loop. Watches the live fast
+# limit and re-applies the whole preset whenever it drifts off 35 W.
 # read_pm_sensors(...).fast_limit replaces get_fast_limit; one apply() call
 # replaces the per-field set_* calls. (The CLI does the same with --reapply=3.)
 
-info = zenmaster.detect()
+info = detect()
 
 if smu.ensure_backend() is None:
     sys.exit("ZenMaster could not get initialized (run as root/admin)")
@@ -21,7 +20,7 @@ while True:
     limit = round(sensors.fast_limit) if sensors and sensors.fast_limit is not None else None
     if limit != 35:
         print("reapply limits, because old limit was {}".format(limit))
-        results, rejected = zenmaster.apply(preset, info.family)
+        results, rejected = apply(preset, info.family)
         for r in results:
             if r["error"] or r["status"] != smu.SMU_OK:
                 sys.stderr.write("{:s} -> {:s}\n".format(
